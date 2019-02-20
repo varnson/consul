@@ -21,8 +21,9 @@ type ACLTokenPolicyLink struct {
 	Name string
 }
 type ACLTokenRoleLink struct {
-	ID   string
-	Name string
+	ID        string
+	Name      string
+	BoundName string `json:",omitempty"`
 }
 
 // ACLToken represents an ACL Token
@@ -141,6 +142,53 @@ type ACLRoleListEntry struct {
 	Hash              []byte
 	CreateIndex       uint64
 	ModifyIndex       uint64
+}
+
+type ACLRoleBindingRule struct {
+	ID          string
+	Description string
+	IDPName     string
+	Match       []*ACLRoleBindingRuleMatch
+	RoleName    string
+	MustExist   bool `json:",omitempty"`
+
+	CreateIndex uint64
+	ModifyIndex uint64
+}
+
+type ACLRoleBindingRuleMatch struct {
+	Selector []string
+}
+
+type ACLIdentityProvider struct {
+	Name        string
+	Description string
+	Type        string
+
+	KubernetesHost              string `json:",omitempty"`
+	KubernetesCACert            string `json:",omitempty"`
+	KubernetesServiceAccountJWT string `json:",omitempty"`
+
+	CreateIndex uint64
+	ModifyIndex uint64
+}
+
+type ACLIdentityProviderListEntry struct {
+	Name        string
+	Description string
+	Type        string
+
+	KubernetesHost string `json:",omitempty"`
+
+	CreateIndex uint64
+	ModifyIndex uint64
+}
+
+type ACLLoginParams struct {
+	IDPType  string
+	IDPName  string
+	IDPToken string
+	Meta     map[string]string `json:",omitempty"`
 }
 
 // ACL can be used to query the ACL endpoints
@@ -509,7 +557,7 @@ func (a *ACL) PolicyCreate(policy *ACLPolicy, q *WriteOptions) (*ACLPolicy, *Wri
 // existing policy ID
 func (a *ACL) PolicyUpdate(policy *ACLPolicy, q *WriteOptions) (*ACLPolicy, *WriteMeta, error) {
 	if policy.ID == "" {
-		return nil, nil, fmt.Errorf("Must specify an ID in Policy Creation")
+		return nil, nil, fmt.Errorf("Must specify an ID in Policy Update")
 	}
 
 	r := a.c.newRequest("PUT", "/v1/acl/policy/"+policy.ID)
@@ -665,7 +713,7 @@ func (a *ACL) RoleCreate(role *ACLRole, q *WriteOptions) (*ACLRole, *WriteMeta, 
 // existing role ID
 func (a *ACL) RoleUpdate(role *ACLRole, q *WriteOptions) (*ACLRole, *WriteMeta, error) {
 	if role.ID == "" {
-		return nil, nil, fmt.Errorf("Must specify an ID in Role Creation")
+		return nil, nil, fmt.Errorf("Must specify an ID in Role Update")
 	}
 
 	r := a.c.newRequest("PUT", "/v1/acl/role/"+role.ID)
@@ -773,4 +821,273 @@ func (a *ACL) RoleList(q *QueryOptions) ([]*ACLRoleListEntry, *QueryMeta, error)
 		return nil, nil, err
 	}
 	return entries, qm, nil
+}
+
+// IdentityProviderCreate will create a new identity provider.
+func (a *ACL) IdentityProviderCreate(idp *ACLIdentityProvider, q *WriteOptions) (*ACLIdentityProvider, *WriteMeta, error) {
+	if idp.Name == "" {
+		return nil, nil, fmt.Errorf("Must specify a Name in Identity Provider Creation")
+	}
+
+	r := a.c.newRequest("PUT", "/v1/acl/idp")
+	r.setWriteOptions(q)
+	r.obj = idp
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	var out ACLIdentityProvider
+	if err := decodeBody(resp, &out); err != nil {
+		return nil, nil, err
+	}
+
+	return &out, wm, nil
+}
+
+// IdentityProviderUpdate updates an identity provider.
+func (a *ACL) IdentityProviderUpdate(idp *ACLIdentityProvider, q *WriteOptions) (*ACLIdentityProvider, *WriteMeta, error) {
+	if idp.Name == "" {
+		return nil, nil, fmt.Errorf("Must specify a Name in Identity Provider Update")
+	}
+
+	r := a.c.newRequest("PUT", "/v1/acl/idp/"+url.QueryEscape(idp.Name))
+	r.setWriteOptions(q)
+	r.obj = idp
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	var out ACLIdentityProvider
+	if err := decodeBody(resp, &out); err != nil {
+		return nil, nil, err
+	}
+
+	return &out, wm, nil
+}
+
+// IdentityProviderDelete deletes an identity provider given its Name.
+func (a *ACL) IdentityProviderDelete(idpName string, q *WriteOptions) (*WriteMeta, error) {
+	if idpName == "" {
+		return nil, fmt.Errorf("Must specify a Name in Identity Provider Delete")
+	}
+
+	r := a.c.newRequest("DELETE", "/v1/acl/idp/"+url.QueryEscape(idpName))
+	r.setWriteOptions(q)
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	return wm, nil
+}
+
+// IdentityProviderRead retrieves the identity provider. Returns nil if not found.
+func (a *ACL) IdentityProviderRead(idpName string, q *QueryOptions) (*ACLIdentityProvider, *QueryMeta, error) {
+	if idpName == "" {
+		return nil, nil, fmt.Errorf("Must specify a Name in Identity Provider Read")
+	}
+
+	r := a.c.newRequest("GET", "/v1/acl/idp/"+url.QueryEscape(idpName))
+	r.setQueryOptions(q)
+	found, rtt, resp, err := requireNotFoundOrOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	qm := &QueryMeta{}
+	parseQueryMeta(resp, qm)
+	qm.RequestTime = rtt
+
+	if !found {
+		return nil, qm, nil
+	}
+
+	var out ACLIdentityProvider
+	if err := decodeBody(resp, &out); err != nil {
+		return nil, nil, err
+	}
+
+	return &out, qm, nil
+}
+
+// IdentityProviderList retrieves a listing of all identity providers. The
+// listing does not include some metadata for the identity provider as those
+// should be retrieved by subsequent calls to IdentityProviderRead.
+func (a *ACL) IdentityProviderList(q *QueryOptions) ([]*ACLIdentityProviderListEntry, *QueryMeta, error) {
+	r := a.c.newRequest("GET", "/v1/acl/idps")
+	r.setQueryOptions(q)
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	qm := &QueryMeta{}
+	parseQueryMeta(resp, qm)
+	qm.RequestTime = rtt
+
+	var entries []*ACLIdentityProviderListEntry
+	if err := decodeBody(resp, &entries); err != nil {
+		return nil, nil, err
+	}
+	return entries, qm, nil
+}
+
+// RoleBindingRuleCreate will create a new role binding rule. It is not allowed
+// for the role binding rule parameter's ID field to be set as this will be
+// generated by Consul while processing the request.
+func (a *ACL) RoleBindingRuleCreate(rule *ACLRoleBindingRule, q *WriteOptions) (*ACLRoleBindingRule, *WriteMeta, error) {
+	if rule.ID != "" {
+		return nil, nil, fmt.Errorf("Cannot specify an ID in Role Binding Rule Creation")
+	}
+
+	r := a.c.newRequest("PUT", "/v1/acl/rolebindingrule")
+	r.setWriteOptions(q)
+	r.obj = rule
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	var out ACLRoleBindingRule
+	if err := decodeBody(resp, &out); err != nil {
+		return nil, nil, err
+	}
+
+	return &out, wm, nil
+}
+
+// RoleBindingRuleUpdate updates a role binding rule. The ID field of the role
+// binding rule parameter must be set to an existing role binding rule ID.
+func (a *ACL) RoleBindingRuleUpdate(rule *ACLRoleBindingRule, q *WriteOptions) (*ACLRoleBindingRule, *WriteMeta, error) {
+	if rule.ID == "" {
+		return nil, nil, fmt.Errorf("Must specify an ID in Role Binding Rule Update")
+	}
+
+	r := a.c.newRequest("PUT", "/v1/acl/rolebindingrule/"+rule.ID)
+	r.setWriteOptions(q)
+	r.obj = rule
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	var out ACLRoleBindingRule
+	if err := decodeBody(resp, &out); err != nil {
+		return nil, nil, err
+	}
+
+	return &out, wm, nil
+}
+
+// RoleBindingRuleDelete deletes a role binding rule given its ID.
+func (a *ACL) RoleBindingRuleDelete(roleBindingRuleID string, q *WriteOptions) (*WriteMeta, error) {
+	r := a.c.newRequest("DELETE", "/v1/acl/rolebindingrule/"+roleBindingRuleID)
+	r.setWriteOptions(q)
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	return wm, nil
+}
+
+// RoleBindingRuleRead retrieves the role binding rule details. Returns nil if not found.
+func (a *ACL) RoleBindingRuleRead(roleBindingRuleID string, q *QueryOptions) (*ACLRoleBindingRule, *QueryMeta, error) {
+	r := a.c.newRequest("GET", "/v1/acl/rolebindingrule/"+roleBindingRuleID)
+	r.setQueryOptions(q)
+	found, rtt, resp, err := requireNotFoundOrOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	qm := &QueryMeta{}
+	parseQueryMeta(resp, qm)
+	qm.RequestTime = rtt
+
+	if !found {
+		return nil, qm, nil
+	}
+
+	var out ACLRoleBindingRule
+	if err := decodeBody(resp, &out); err != nil {
+		return nil, nil, err
+	}
+
+	return &out, qm, nil
+}
+
+// RoleBindingRuleList retrieves a listing of all role binding rules.
+func (a *ACL) RoleBindingRuleList(idpName string, q *QueryOptions) ([]*ACLRoleBindingRule, *QueryMeta, error) {
+	r := a.c.newRequest("GET", "/v1/acl/rolebindingrules")
+	if idpName != "" {
+		r.params.Set("idp", idpName)
+	}
+	r.setQueryOptions(q)
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	qm := &QueryMeta{}
+	parseQueryMeta(resp, qm)
+	qm.RequestTime = rtt
+
+	var entries []*ACLRoleBindingRule
+	if err := decodeBody(resp, &entries); err != nil {
+		return nil, nil, err
+	}
+	return entries, qm, nil
+}
+
+// Login is used to exchange identity provider credentials for a newly-minted
+// Consul Token.
+func (a *ACL) Login(auth *ACLLoginParams, q *WriteOptions) (*ACLToken, *WriteMeta, error) {
+	r := a.c.newRequest("POST", "/v1/acl/login")
+	r.setWriteOptions(q)
+	r.obj = auth
+
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	var out ACLToken
+	if err := decodeBody(resp, &out); err != nil {
+		return nil, nil, err
+	}
+	return &out, wm, nil
+}
+
+// Logout is used to destroy a Consul Token created via Login().
+func (a *ACL) Logout(q *WriteOptions) (*WriteMeta, error) {
+	r := a.c.newRequest("POST", "/v1/acl/logout")
+	r.setWriteOptions(q)
+	rtt, resp, err := requireOK(a.c.doRequest(r))
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+
+	wm := &WriteMeta{RequestTime: rtt}
+	return wm, nil
 }

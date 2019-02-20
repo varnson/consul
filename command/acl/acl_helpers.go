@@ -29,7 +29,11 @@ func PrintToken(token *api.ACLToken, ui cli.Ui, showMeta bool) {
 	}
 	ui.Info(fmt.Sprintf("Roles:"))
 	for _, role := range token.Roles {
-		ui.Info(fmt.Sprintf("   %s - %s", role.ID, role.Name))
+		if role.BoundName == "" {
+			ui.Info(fmt.Sprintf("   %s - %s", role.ID, role.Name))
+		} else {
+			ui.Info(fmt.Sprintf("   %s", role.BoundName))
+		}
 	}
 	ui.Info(fmt.Sprintf("Service Identities:"))
 	for _, svcid := range token.ServiceIdentities {
@@ -65,7 +69,11 @@ func PrintTokenListEntry(token *api.ACLTokenListEntry, ui cli.Ui, showMeta bool)
 	}
 	ui.Info(fmt.Sprintf("Roles:"))
 	for _, role := range token.Roles {
-		ui.Info(fmt.Sprintf("   %s - %s", role.ID, role.Name))
+		if role.BoundName == "" {
+			ui.Info(fmt.Sprintf("   %s - %s", role.ID, role.Name))
+		} else {
+			ui.Info(fmt.Sprintf("   %s", role.BoundName))
+		}
 	}
 	ui.Info(fmt.Sprintf("Service Identities:"))
 	for _, svcid := range token.ServiceIdentities {
@@ -145,6 +153,61 @@ func PrintRoleListEntry(role *api.ACLRoleListEntry, ui cli.Ui, showMeta bool) {
 			ui.Info(fmt.Sprintf("   %s (Datacenters: %s)", svcid.ServiceName, strings.Join(svcid.Datacenters, ", ")))
 		} else {
 			ui.Info(fmt.Sprintf("   %s (Datacenters: all)", svcid.ServiceName))
+		}
+	}
+}
+
+func PrintIdentityProvider(idp *api.ACLIdentityProvider, ui cli.Ui, showMeta bool) {
+	ui.Info(fmt.Sprintf("Name:         %s", idp.Name))
+	ui.Info(fmt.Sprintf("Type:         %s", idp.Type))
+	ui.Info(fmt.Sprintf("Description:  %s", idp.Description))
+	if showMeta {
+		ui.Info(fmt.Sprintf("Create Index: %d", idp.CreateIndex))
+		ui.Info(fmt.Sprintf("Modify Index: %d", idp.ModifyIndex))
+	}
+	if idp.Type == "kubernetes" {
+		ui.Info(fmt.Sprintf("Kubernetes:"))
+		ui.Info(fmt.Sprintf("  Host: %s", idp.KubernetesHost))
+		ui.Info(fmt.Sprintf("  CA Cert:"))
+		if idp.KubernetesCACert != "" {
+			ui.Info(fmt.Sprintf("    %s", idp.KubernetesCACert))
+		}
+		ui.Info(fmt.Sprintf("  Service Account JWT:"))
+		if idp.KubernetesServiceAccountJWT != "" {
+			ui.Info(fmt.Sprintf("    %s", idp.KubernetesServiceAccountJWT))
+		}
+	}
+}
+
+func PrintIdentityProviderListEntry(idp *api.ACLIdentityProviderListEntry, ui cli.Ui, showMeta bool) {
+	ui.Info(fmt.Sprintf("%s:", idp.Name))
+	ui.Info(fmt.Sprintf("   Type:         %s", idp.Type))
+	ui.Info(fmt.Sprintf("   Description:  %s", idp.Description))
+	if showMeta {
+		ui.Info(fmt.Sprintf("   Create Index: %d", idp.CreateIndex))
+		ui.Info(fmt.Sprintf("   Modify Index: %d", idp.ModifyIndex))
+	}
+	if idp.Type == "kubernetes" {
+		ui.Info(fmt.Sprintf("Kubernetes:"))
+		ui.Info(fmt.Sprintf("  Host: %s", idp.KubernetesHost))
+	}
+}
+
+func PrintRoleBindingRule(rule *api.ACLRoleBindingRule, ui cli.Ui, showMeta bool) {
+	ui.Info(fmt.Sprintf("ID:           %s", rule.ID))
+	ui.Info(fmt.Sprintf("IDPName:      %s", rule.IDPName))
+	ui.Info(fmt.Sprintf("Description:  %s", rule.Description))
+	ui.Info(fmt.Sprintf("RoleName:     %s", rule.RoleName))
+	ui.Info(fmt.Sprintf("MustExist:    %v", rule.MustExist))
+	if showMeta {
+		ui.Info(fmt.Sprintf("Create Index: %d", rule.CreateIndex))
+		ui.Info(fmt.Sprintf("Modify Index: %d", rule.ModifyIndex))
+	}
+	ui.Info(fmt.Sprintf("Match:"))
+	for i, match := range rule.Match {
+		ui.Info(fmt.Sprintf("  %d:", i))
+		for _, sel := range match.Selector {
+			ui.Info(fmt.Sprintf("     %s", sel))
 		}
 	}
 }
@@ -309,6 +372,34 @@ func GetRoleIDByName(client *api.Client, name string) (string, error) {
 	return "", fmt.Errorf("No such role with name %s", name)
 }
 
+func GetRoleBindingRuleIDFromPartial(client *api.Client, partialID string) (string, error) {
+	// the full UUID string was given
+	if len(partialID) == 36 {
+		return partialID, nil
+	}
+
+	rules, _, err := client.ACL().RoleBindingRuleList("", nil)
+	if err != nil {
+		return "", err
+	}
+
+	ruleID := ""
+	for _, rule := range rules {
+		if strings.HasPrefix(rule.ID, partialID) {
+			if ruleID != "" {
+				return "", fmt.Errorf("Partial rule ID is not unique")
+			}
+			ruleID = rule.ID
+		}
+	}
+
+	if ruleID == "" {
+		return "", fmt.Errorf("No such rule ID with prefix: %s", partialID)
+	}
+
+	return ruleID, nil
+}
+
 func ExtractServiceIdentities(serviceIdents []string) ([]*api.ACLServiceIdentity, error) {
 	var out []*api.ACLServiceIdentity
 	for _, svcidRaw := range serviceIdents {
@@ -329,3 +420,33 @@ func ExtractServiceIdentities(serviceIdents []string) ([]*api.ACLServiceIdentity
 	}
 	return out, nil
 }
+
+func ParseRoleBindingRuleMatchSelectors(matchSelectors []string) ([]*api.ACLRoleBindingRuleMatch, error) {
+	var found []*api.ACLRoleBindingRuleMatch
+
+	for _, rawMatch := range matchSelectors {
+		rawSelectors := strings.Split(rawMatch, ",")
+		if len(rawSelectors) == 0 {
+			return nil, fmt.Errorf("Invalid match selector: %s", rawMatch)
+		}
+
+		var m api.ACLRoleBindingRuleMatch
+		for _, rawSelector := range rawSelectors {
+			selector := strings.TrimSpace(rawSelector)
+			if selector == "" {
+				return nil, fmt.Errorf("Invalid match selector: %s", rawMatch)
+			}
+			m.Selector = append(m.Selector, selector)
+		}
+
+		found = append(found, &m)
+	}
+
+	return found, nil
+}
+
+// TestKubernetesJWT_A is a valid service account jwt extracted from a minikube setup.
+const TestKubernetesJWT_A = "eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImRlbW8tdG9rZW4ta21iOW4iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiZGVtbyIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc2MDkxYWY0LTRiNTYtMTFlOS1hYzRiLTcwOGIxMTgwMWNiZSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OmRlbW8ifQ.ZiAHjijBAOsKdum0Aix6lgtkLkGo9_Tu87dWQ5Zfwnn3r2FejEWDAnftTft1MqqnMzivZ9Wyyki5ZjQRmTAtnMPJuHC-iivqY4Wh4S6QWCJ1SivBv5tMZR79t5t8mE7R1-OHwst46spru1pps9wt9jsA04d3LpV0eeKYgdPTVaQKklxTm397kIMUugA6yINIBQ3Rh8eQqBgNwEmL4iqyYubzHLVkGkoP9MJikFI05vfRiHtYr-piXz6JFDzXMQj9rW6xtMmrBSn79ChbyvC5nz-Nj2rJPnHsb_0rDUbmXY5PpnMhBpdSH-CbZ4j8jsiib6DtaGJhVZeEQ1GjsFAZwQ"
+
+// TestKubernetesJWT_B is a valid service account jwt extracted from a minikube setup.
+const TestKubernetesJWT_B = "eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImNvbnN1bC1pZHAtdG9rZW4tcmV2aWV3LWFjY291bnQtdG9rZW4tbTYyZHMiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiY29uc3VsLWlkcC10b2tlbi1yZXZpZXctYWNjb3VudCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc1ZTNjYmVhLTRiNTYtMTFlOS1hYzRiLTcwOGIxMTgwMWNiZSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OmNvbnN1bC1pZHAtdG9rZW4tcmV2aWV3LWFjY291bnQifQ.uMb66tZ8d8gNzS8EnjlkzbrGKc5M-BESwS5B46IUbKfdMtajsCwgBXICytWKQ2X7wfm4QQykHVaElijBlO8QVvYeYzQE0uy75eH9EXNXmRh862YL_Qcy_doPC0R6FQXZW99S5Joc-3riKsq7N-sjEDBshOqyfDaGfan3hxaiV4Bv4hXXWRFUQ9aTAfPVvk1FQi21U9Fbml9ufk8kkk6gAmIEA_o7p-ve6WIhm48t7MJv314YhyVqXdrvmRykPdMwj4TfwSn3pTJ82P4NgSbXMJhwNkwIadJPZrM8EfN5ISpR4EW3jzP3IHtgQxrIovWQ9TQib1Z5zdRaLWaFVm6XaQ"
