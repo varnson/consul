@@ -101,22 +101,4 @@ export default Adapter.extend({
       .request(request => this.requestForClone(request, data))
       .then(respond => serializer.respondForQueryRecord(respond, data));
   },
-  handleSingleResponse: function(url, response, primary, slug) {
-    // TODO: Serializer
-    // Sometimes we get `Policies: null`, make null equal an empty array
-    if (typeof response.Policies === 'undefined' || response.Policies === null) {
-      response.Policies = [];
-    }
-    // Convert an old style update response to a new style
-    if (typeof response['ID'] !== 'undefined') {
-      const item = get(this, 'store')
-        .peekAll('token')
-        .findBy('SecretID', response['ID']);
-      if (item) {
-        response['SecretID'] = response['ID'];
-        response['AccessorID'] = get(item, 'AccessorID');
-      }
-    }
-    return this._super(url, response, primary, slug);
-  },
 });
