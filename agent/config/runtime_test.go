@@ -5434,12 +5434,14 @@ func TestRuntime_ToTLSUtilConfig(t *testing.T) {
 		VerifyIncomingRPC:           true,
 		VerifyIncomingHTTPS:         true,
 		VerifyOutgoing:              true,
+		VerifyServerHostname:        true,
 		CAFile:                      "a",
 		CAPath:                      "b",
 		CertFile:                    "c",
 		KeyFile:                     "d",
 		NodeName:                    "e",
 		ServerName:                  "f",
+		DNSDomain:                   "g",
 		TLSMinVersion:               "tls12",
 		TLSCipherSuites:             []uint16{tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305},
 		TLSPreferServerCipherSuites: true,
@@ -5450,12 +5452,14 @@ func TestRuntime_ToTLSUtilConfig(t *testing.T) {
 	require.Equal(t, c.VerifyIncomingRPC, r.VerifyIncomingRPC)
 	require.Equal(t, c.VerifyIncomingHTTPS, r.VerifyIncomingHTTPS)
 	require.Equal(t, c.VerifyOutgoing, r.VerifyOutgoing)
+	require.Equal(t, c.VerifyServerHostname, r.VerifyServerHostname)
 	require.Equal(t, c.CAFile, r.CAFile)
 	require.Equal(t, c.CAPath, r.CAPath)
 	require.Equal(t, c.CertFile, r.CertFile)
 	require.Equal(t, c.KeyFile, r.KeyFile)
 	require.Equal(t, c.NodeName, r.NodeName)
 	require.Equal(t, c.ServerName, r.ServerName)
+	require.Equal(t, c.DNSDomain, r.Domain)
 	require.Equal(t, c.TLSMinVersion, r.TLSMinVersion)
 	require.Equal(t, c.TLSCipherSuites, r.CipherSuites)
 	require.Equal(t, c.TLSPreferServerCipherSuites, r.PreferServerCipherSuites)

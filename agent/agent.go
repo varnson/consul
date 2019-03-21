@@ -393,7 +393,11 @@ func (a *Agent) Start() error {
 	// waiting to discover a consul server
 	consulCfg.ServerUp = a.sync.SyncFull.Trigger
 
-	a.tlsConfigurator = tlsutil.NewConfigurator(c.ToTLSUtilConfig())
+	tlsConfigurator, err := tlsutil.NewConfigurator(c.ToTLSUtilConfig(), a.logger)
+	if err != nil {
+		return err
+	}
+	a.tlsConfigurator = tlsConfigurator
 
 	// Setup either the client or the server.
 	if c.ServerMode {
@@ -662,10 +666,7 @@ func (a *Agent) listenHTTP() ([]*HTTPServer, error) {
 			var tlscfg *tls.Config
 			_, isTCP := l.(*tcpKeepAliveListener)
 			if isTCP && proto == "https" {
-				tlscfg, err = a.tlsConfigurator.IncomingHTTPSConfig()
-				if err != nil {
-					return err
-				}
+				tlscfg = a.tlsConfigurator.IncomingHTTPSConfig()
 				l = tls.NewListener(l, tlscfg)
 			}
 			srv := &HTTPServer{
@@ -2067,8 +2068,22 @@ func (a *Agent) removeServiceLocked(serviceID string, persist bool) error {
 
 	checks := a.State.Checks()
 	var checkIDs []types.CheckID
-	for id := range checks {
+	for id, check := range checks {
+		if check.ServiceID != serviceID {
+			continue
+		}
 		checkIDs = append(checkIDs, id)
+	}
+
+	// Remove the associated managed proxy if it exists
+	// This has to be DONE before purging configuration as might might have issues
+	// With ACLs otherwise
+	for proxyID, p := range a.State.Proxies() {
+		if p.Proxy.TargetServiceID == serviceID {
+			if err := a.removeProxyLocked(proxyID, true); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Remove service immediately
@@ -2091,15 +2106,6 @@ func (a *Agent) removeServiceLocked(serviceID string, persist bool) error {
 		}
 		if err := a.removeCheckLocked(checkID, persist); err != nil {
 			return err
-		}
-	}
-
-	// Remove the associated managed proxy if it exists
-	for proxyID, p := range a.State.Proxies() {
-		if p.Proxy.TargetServiceID == serviceID {
-			if err := a.removeProxyLocked(proxyID, true); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -2232,11 +2238,7 @@ func (a *Agent) addCheck(check *structs.HealthCheck, chkType *structs.CheckType,
 				chkType.Interval = checks.MinInterval
 			}
 
-			a.tlsConfigurator.AddCheck(string(check.CheckID), chkType.TLSSkipVerify)
-			tlsClientConfig, err := a.tlsConfigurator.OutgoingTLSConfigForCheck(string(check.CheckID))
-			if err != nil {
-				return fmt.Errorf("Failed to set up TLS: %v", err)
-			}
+			tlsClientConfig := a.tlsConfigurator.OutgoingTLSConfigForCheck(chkType.TLSSkipVerify)
 
 			http := &checks.CheckHTTP{
 				Notify:          a.State,
@@ -2287,12 +2289,7 @@ func (a *Agent) addCheck(check *structs.HealthCheck, chkType *structs.CheckType,
 
 			var tlsClientConfig *tls.Config
 			if chkType.GRPCUseTLS {
-				var err error
-				a.tlsConfigurator.AddCheck(string(check.CheckID), chkType.TLSSkipVerify)
-				tlsClientConfig, err = a.tlsConfigurator.OutgoingTLSConfigForCheck(string(check.CheckID))
-				if err != nil {
-					return fmt.Errorf("Failed to set up TLS: %v", err)
-				}
+				tlsClientConfig = a.tlsConfigurator.OutgoingTLSConfigForCheck(chkType.TLSSkipVerify)
 			}
 
 			grpc := &checks.CheckGRPC{
@@ -2431,7 +2428,6 @@ func (a *Agent) removeCheckLocked(checkID types.CheckID, persist bool) error {
 		return fmt.Errorf("CheckID missing")
 	}
 
-	a.tlsConfigurator.RemoveCheck(string(checkID))
 	a.cancelCheckMonitors(checkID)
 	a.State.RemoveCheck(checkID)
 
@@ -3558,6 +3554,10 @@ func (a *Agent) ReloadConfig(newCfg *config.RuntimeConfig) error {
 	// to ensure the correct tokens are available for attaching to
 	// the checks and service registrations.
 	a.loadTokens(newCfg)
+
+	if err := a.tlsConfigurator.Update(newCfg.ToTLSUtilConfig()); err != nil {
+		return fmt.Errorf("Failed reloading tls configuration: %s", err)
+	}
 
 	// Reload service/check definitions and metadata.
 	if err := a.loadServices(newCfg); err != nil {
