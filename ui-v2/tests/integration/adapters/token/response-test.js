@@ -6,8 +6,8 @@ module('Integration | Adapter | token | response', function(hooks) {
   setupTest(hooks);
   const dc = 'dc-1';
   const id = 'token-name';
-  test('handleResponse returns the correct data for list endpoint', function(assert) {
-    const adapter = this.owner.lookup('adapter:token');
+  test('respondForQuery returns the correct data for list endpoint', function(assert) {
+    const serializer = this.owner.lookup('serializer:token');
     const request = {
       url: `/v1/acl/tokens?dc=${dc}`,
     };
@@ -18,12 +18,21 @@ module('Integration | Adapter | token | response', function(hooks) {
           uid: `["${dc}","${item.AccessorID}"]`,
         })
       );
-      const actual = adapter.handleResponse(200, {}, payload, request);
+      const actual = serializer.respondForQuery(
+        function(cb) {
+          const headers = {};
+          const body = payload;
+          return cb(headers, body);
+        },
+        {
+          dc: dc,
+        }
+      );
       assert.deepEqual(actual, expected);
     });
   });
-  test('handleResponse returns the correct data for item endpoint', function(assert) {
-    const adapter = this.owner.lookup('adapter:token');
+  test('respondForQueryRecord returns the correct data for item endpoint', function(assert) {
+    const serializer = this.owner.lookup('serializer:token');
     const request = {
       url: `/v1/acl/token/${id}?dc=${dc}`,
     };
@@ -33,7 +42,16 @@ module('Integration | Adapter | token | response', function(hooks) {
         [META]: {},
         uid: `["${dc}","${id}"]`,
       });
-      const actual = adapter.handleResponse(200, {}, payload, request);
+      const actual = serializer.respondForQueryRecord(
+        function(cb) {
+          const headers = {};
+          const body = payload;
+          return cb(headers, body);
+        },
+        {
+          dc: dc,
+        }
+      );
       assert.deepEqual(actual, expected);
     });
   });
