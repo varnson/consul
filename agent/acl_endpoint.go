@@ -374,6 +374,7 @@ func (s *HTTPServer) ACLTokenList(resp http.ResponseWriter, req *http.Request) (
 	}
 
 	args.Policy = req.URL.Query().Get("policy")
+	args.Role = req.URL.Query().Get("role")
 
 	var out structs.ACLTokenListResponse
 	defer setMeta(resp, &out.QueryMeta)
@@ -562,6 +563,8 @@ func (s *HTTPServer) ACLRoleList(resp http.ResponseWriter, req *http.Request) (i
 	if args.Datacenter == "" {
 		args.Datacenter = s.agent.config.Datacenter
 	}
+
+	args.Policy = req.URL.Query().Get("policy")
 
 	var out structs.ACLRoleListResponse
 	defer setMeta(resp, &out.QueryMeta)

@@ -920,6 +920,7 @@ type ACLTokenListRequest struct {
 	IncludeLocal  bool   // Whether local tokens should be included
 	IncludeGlobal bool   // Whether global tokens should be included
 	Policy        string // Policy filter
+	Role          string // Role filter
 	Datacenter    string // The datacenter to perform the request within
 	QueryOptions
 }
@@ -1124,6 +1125,7 @@ func (r *ACLRoleGetRequest) RequestDatacenter() string {
 
 // ACLRoleListRequest is used at the RPC layer to request a listing of roles
 type ACLRoleListRequest struct {
+	Policy     string // Policy filter
 	Datacenter string // The datacenter to perform the request within
 	QueryOptions
 }

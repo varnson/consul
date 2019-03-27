@@ -890,7 +890,7 @@ func (s *Store) aclTokenGetTxn(tx *memdb.Txn, ws memdb.WatchSet, value, index st
 }
 
 // ACLTokenList is used to list out all of the ACLs in the state store.
-func (s *Store) ACLTokenList(ws memdb.WatchSet, local, global bool, policy string) (uint64, structs.ACLTokens, error) {
+func (s *Store) ACLTokenList(ws memdb.WatchSet, local, global bool, policy, role string) (uint64, structs.ACLTokens, error) {
 	tx := s.db.Txn(false)
 	defer tx.Abort()
 
@@ -901,8 +901,30 @@ func (s *Store) ACLTokenList(ws memdb.WatchSet, local, global bool, policy strin
 	// to false but for defaulted structs (zero values for both) we want it to list out
 	// all tokens so our checks just ensure that global == local
 
+	if policy != "" && role != "" {
+		return 0, nil, fmt.Errorf("cannot filter by role and policy at the same time")
+	}
+
 	if policy != "" {
 		iter, err = tx.Get("acl-tokens", "policies", policy)
+		if err == nil && global != local {
+			iter = memdb.NewFilterIterator(iter, func(raw interface{}) bool {
+				token, ok := raw.(*structs.ACLToken)
+				if !ok {
+					return true
+				}
+
+				if global && !token.Local {
+					return false
+				} else if local && token.Local {
+					return false
+				}
+
+				return true
+			})
+		}
+	} else if role != "" {
+		iter, err = tx.Get("acl-tokens", "roles", role)
 		if err == nil && global != local {
 			iter = memdb.NewFilterIterator(iter, func(raw interface{}) bool {
 				token, ok := raw.(*structs.ACLToken)
@@ -1466,11 +1488,19 @@ func (s *Store) aclRoleGet(ws memdb.WatchSet, value, index string) (uint64, *str
 	return idx, role, nil
 }
 
-func (s *Store) ACLRoleList(ws memdb.WatchSet) (uint64, structs.ACLRoles, error) {
+func (s *Store) ACLRoleList(ws memdb.WatchSet, policy string) (uint64, structs.ACLRoles, error) {
 	tx := s.db.Txn(false)
 	defer tx.Abort()
 
-	iter, err := tx.Get("acl-roles", "id")
+	var iter memdb.ResultIterator
+	var err error
+
+	if policy != "" {
+		iter, err = tx.Get("acl-roles", "policies", policy)
+	} else {
+		iter, err = tx.Get("acl-roles", "id")
+	}
+
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed acl role lookup: %v", err)
 	}

@@ -205,7 +205,7 @@ func TestStateStore_ACLBootstrap(t *testing.T) {
 	require.Equal(t, uint64(3), index)
 
 	// Make sure the ACLs are in an expected state.
-	_, tokens, err := s.ACLTokenList(nil, true, true, "")
+	_, tokens, err := s.ACLTokenList(nil, true, true, "", "")
 	require.NoError(t, err)
 	require.Len(t, tokens, 1)
 	compareTokens(t, token1, tokens[0])
@@ -219,7 +219,7 @@ func TestStateStore_ACLBootstrap(t *testing.T) {
 	err = s.ACLBootstrap(32, index, token2.Clone(), false)
 	require.NoError(t, err)
 
-	_, tokens, err = s.ACLTokenList(nil, true, true, "")
+	_, tokens, err = s.ACLTokenList(nil, true, true, "", "")
 	require.NoError(t, err)
 	require.Len(t, tokens, 2)
 }
@@ -872,6 +872,27 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 			},
 			Local: true,
 		},
+		// the role specific token
+		&structs.ACLToken{
+			AccessorID: "a7715fde-8954-4c92-afbc-d84c6ecdc582",
+			SecretID:   "77a2da3a-b479-4025-a83e-bd6b859f0cfe",
+			Roles: []structs.ACLTokenRoleLink{
+				structs.ACLTokenRoleLink{
+					ID: testRoleID_A,
+				},
+			},
+		},
+		// the role specific token and local
+		&structs.ACLToken{
+			AccessorID: "cadb4f13-f62a-49ab-ab3f-5a7e01b925d9",
+			SecretID:   "c432d12b-3c86-4628-b74f-94ddfc7fb3ba",
+			Roles: []structs.ACLTokenRoleLink{
+				structs.ACLTokenRoleLink{
+					ID: testRoleID_A,
+				},
+			},
+			Local: true,
+		},
 	}
 
 	require.NoError(t, s.ACLTokenBatchSet(2, tokens, false))
@@ -881,6 +902,7 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 		local     bool
 		global    bool
 		policy    string
+		role      string
 		accessors []string
 	}
 
@@ -890,10 +912,12 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 			local:  false,
 			global: true,
 			policy: "",
+			role:   "",
 			accessors: []string{
 				structs.ACLTokenAnonymousID,
-				"47eea4da-bda1-48a6-901c-3e36d2d9262f",
-				"54866514-3cf2-4fec-8a8a-710583831834",
+				"47eea4da-bda1-48a6-901c-3e36d2d9262f", // policy + global
+				"54866514-3cf2-4fec-8a8a-710583831834", // mgmt + global
+				"a7715fde-8954-4c92-afbc-d84c6ecdc582", // role + global
 			},
 		},
 		{
@@ -901,9 +925,11 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 			local:  true,
 			global: false,
 			policy: "",
+			role:   "",
 			accessors: []string{
-				"4915fc9d-3726-4171-b588-6c271f45eecd",
-				"f1093997-b6c7-496d-bfb8-6b1b1895641b",
+				"4915fc9d-3726-4171-b588-6c271f45eecd", // policy + local
+				"cadb4f13-f62a-49ab-ab3f-5a7e01b925d9", // role + local
+				"f1093997-b6c7-496d-bfb8-6b1b1895641b", // mgmt + local
 			},
 		},
 		{
@@ -911,9 +937,10 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 			local:  true,
 			global: true,
 			policy: testPolicyID_A,
+			role:   "",
 			accessors: []string{
-				"47eea4da-bda1-48a6-901c-3e36d2d9262f",
-				"4915fc9d-3726-4171-b588-6c271f45eecd",
+				"47eea4da-bda1-48a6-901c-3e36d2d9262f", // policy + global
+				"4915fc9d-3726-4171-b588-6c271f45eecd", // policy + local
 			},
 		},
 		{
@@ -921,8 +948,9 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 			local:  true,
 			global: false,
 			policy: testPolicyID_A,
+			role:   "",
 			accessors: []string{
-				"4915fc9d-3726-4171-b588-6c271f45eecd",
+				"4915fc9d-3726-4171-b588-6c271f45eecd", // policy + local
 			},
 		},
 		{
@@ -930,8 +958,40 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 			local:  false,
 			global: true,
 			policy: testPolicyID_A,
+			role:   "",
 			accessors: []string{
-				"47eea4da-bda1-48a6-901c-3e36d2d9262f",
+				"47eea4da-bda1-48a6-901c-3e36d2d9262f", // policy + global
+			},
+		},
+		{
+			name:   "Role",
+			local:  true,
+			global: true,
+			policy: "",
+			role:   testRoleID_A,
+			accessors: []string{
+				"a7715fde-8954-4c92-afbc-d84c6ecdc582", // role + global
+				"cadb4f13-f62a-49ab-ab3f-5a7e01b925d9", // role + local
+			},
+		},
+		{
+			name:   "Role - Local",
+			local:  true,
+			global: false,
+			policy: "",
+			role:   testRoleID_A,
+			accessors: []string{
+				"cadb4f13-f62a-49ab-ab3f-5a7e01b925d9", // role + local
+			},
+		},
+		{
+			name:   "Role - Global",
+			local:  false,
+			global: true,
+			policy: "",
+			role:   testRoleID_A,
+			accessors: []string{
+				"a7715fde-8954-4c92-afbc-d84c6ecdc582", // role + global
 			},
 		},
 		{
@@ -939,21 +999,29 @@ func TestStateStore_ACLToken_List(t *testing.T) {
 			local:  true,
 			global: true,
 			policy: "",
+			role:   "",
 			accessors: []string{
 				structs.ACLTokenAnonymousID,
-				"47eea4da-bda1-48a6-901c-3e36d2d9262f",
-				"4915fc9d-3726-4171-b588-6c271f45eecd",
-				"54866514-3cf2-4fec-8a8a-710583831834",
-				"f1093997-b6c7-496d-bfb8-6b1b1895641b",
+				"47eea4da-bda1-48a6-901c-3e36d2d9262f", // policy + global
+				"4915fc9d-3726-4171-b588-6c271f45eecd", // policy + local
+				"54866514-3cf2-4fec-8a8a-710583831834", // mgmt + global
+				"a7715fde-8954-4c92-afbc-d84c6ecdc582", // role + global
+				"cadb4f13-f62a-49ab-ab3f-5a7e01b925d9", // role + local
+				"f1093997-b6c7-496d-bfb8-6b1b1895641b", // mgmt + local
 			},
 		},
 	}
+
+	t.Run("can't filter on both", func(t *testing.T) {
+		_, _, err := s.ACLTokenList(nil, false, false, testPolicyID_A, testRoleID_A)
+		require.Error(t, err)
+	})
 
 	for _, tc := range cases {
 		tc := tc // capture range variable
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, tokens, err := s.ACLTokenList(nil, tc.local, tc.global, tc.policy)
+			_, tokens, err := s.ACLTokenList(nil, tc.local, tc.global, tc.policy, tc.role)
 			require.NoError(t, err)
 			require.Len(t, tokens, len(tc.accessors))
 			tokens.Sort()
@@ -1014,7 +1082,7 @@ func TestStateStore_ACLToken_FixupPolicyLinks(t *testing.T) {
 	require.Equal(t, "node-read-renamed", retrieved.Policies[0].Name)
 
 	// list tokens without stale links
-	_, tokens, err := s.ACLTokenList(nil, true, true, "")
+	_, tokens, err := s.ACLTokenList(nil, true, true, "", "")
 	require.NoError(t, err)
 
 	found := false
@@ -1058,7 +1126,7 @@ func TestStateStore_ACLToken_FixupPolicyLinks(t *testing.T) {
 	require.Len(t, retrieved.Policies, 0)
 
 	// list tokens without stale links
-	_, tokens, err = s.ACLTokenList(nil, true, true, "")
+	_, tokens, err = s.ACLTokenList(nil, true, true, "", "")
 	require.NoError(t, err)
 
 	found = false
@@ -1143,7 +1211,7 @@ func TestStateStore_ACLToken_FixupRoleLinks(t *testing.T) {
 	require.Equal(t, "node-read-role-renamed", retrieved.Roles[0].Name)
 
 	// list tokens without stale links
-	_, tokens, err := s.ACLTokenList(nil, true, true, "")
+	_, tokens, err := s.ACLTokenList(nil, true, true, "", "")
 	require.NoError(t, err)
 
 	found := false
@@ -1187,7 +1255,7 @@ func TestStateStore_ACLToken_FixupRoleLinks(t *testing.T) {
 	require.Len(t, retrieved.Roles, 0)
 
 	// list tokens without stale links
-	_, tokens, err = s.ACLTokenList(nil, true, true, "")
+	_, tokens, err = s.ACLTokenList(nil, true, true, "", "")
 	require.NoError(t, err)
 
 	found = false
@@ -2127,26 +2195,70 @@ func TestStateStore_ACLRole_List(t *testing.T) {
 
 	require.NoError(t, s.ACLRoleBatchSet(2, roles))
 
-	_, rroles, err := s.ACLRoleList(nil)
-	require.NoError(t, err)
-	require.Len(t, rroles, 2)
-	rroles.Sort()
+	type testCase struct {
+		name   string
+		policy string
+		ids    []string
+	}
 
-	require.Equal(t, testRoleID_A, rroles[0].ID)
-	require.Equal(t, "role1", rroles[0].Name)
-	require.Equal(t, "test-role1", rroles[0].Description)
-	require.ElementsMatch(t, roles[0].Policies, rroles[0].Policies)
-	require.Nil(t, rroles[0].Hash)
-	require.Equal(t, uint64(2), rroles[0].CreateIndex)
-	require.Equal(t, uint64(2), rroles[0].ModifyIndex)
+	cases := []testCase{
+		{
+			name:   "Any",
+			policy: "",
+			ids: []string{
+				testRoleID_A,
+				testRoleID_B,
+			},
+		},
+		{
+			name:   "Policy A",
+			policy: testPolicyID_A,
+			ids: []string{
+				testRoleID_A,
+			},
+		},
+		{
+			name:   "Policy B",
+			policy: testPolicyID_B,
+			ids: []string{
+				testRoleID_B,
+			},
+		},
+	}
 
-	require.Equal(t, testRoleID_B, rroles[1].ID)
-	require.Equal(t, "role2", rroles[1].Name)
-	require.Equal(t, "test-role2", rroles[1].Description)
-	require.ElementsMatch(t, roles[1].Policies, rroles[1].Policies)
-	require.Nil(t, rroles[1].Hash)
-	require.Equal(t, uint64(2), rroles[1].CreateIndex)
-	require.Equal(t, uint64(2), rroles[1].ModifyIndex)
+	for _, tc := range cases {
+		tc := tc // capture range variable
+		t.Run(tc.name, func(t *testing.T) {
+			// t.Parallel()
+			_, rroles, err := s.ACLRoleList(nil, tc.policy)
+			require.NoError(t, err)
+
+			require.Len(t, rroles, len(tc.ids))
+			rroles.Sort()
+			for i, rrole := range rroles {
+				expectID := tc.ids[i]
+				require.Equal(t, expectID, rrole.ID)
+				switch expectID {
+				case testRoleID_A:
+					require.Equal(t, testRoleID_A, rrole.ID)
+					require.Equal(t, "role1", rrole.Name)
+					require.Equal(t, "test-role1", rrole.Description)
+					require.ElementsMatch(t, roles[0].Policies, rrole.Policies)
+					require.Nil(t, rrole.Hash)
+					require.Equal(t, uint64(2), rrole.CreateIndex)
+					require.Equal(t, uint64(2), rrole.ModifyIndex)
+				case testRoleID_B:
+					require.Equal(t, testRoleID_B, rrole.ID)
+					require.Equal(t, "role2", rrole.Name)
+					require.Equal(t, "test-role2", rrole.Description)
+					require.ElementsMatch(t, roles[1].Policies, rrole.Policies)
+					require.Nil(t, rrole.Hash)
+					require.Equal(t, uint64(2), rrole.CreateIndex)
+					require.Equal(t, uint64(2), rrole.ModifyIndex)
+				}
+			}
+		})
+	}
 }
 
 func TestStateStore_ACLRole_FixupPolicyLinks(t *testing.T) {
@@ -2199,7 +2311,7 @@ func TestStateStore_ACLRole_FixupPolicyLinks(t *testing.T) {
 	require.Equal(t, "node-read-renamed", retrieved.Policies[0].Name)
 
 	// list roles without stale links
-	_, roles, err := s.ACLRoleList(nil)
+	_, roles, err := s.ACLRoleList(nil, "")
 	require.NoError(t, err)
 
 	found := false
@@ -2243,7 +2355,7 @@ func TestStateStore_ACLRole_FixupPolicyLinks(t *testing.T) {
 	require.Len(t, retrieved.Policies, 0)
 
 	// list roles without stale links
-	_, roles, err = s.ACLRoleList(nil)
+	_, roles, err = s.ACLRoleList(nil, "")
 	require.NoError(t, err)
 
 	found = false
@@ -2539,7 +2651,7 @@ func TestStateStore_ACLTokens_Snapshot_Restore(t *testing.T) {
 		require.NoError(t, s.ACLRoleBatchSet(2, roles))
 
 		// Read the restored ACLs back out and verify that they match.
-		idx, res, err := s.ACLTokenList(nil, true, true, "")
+		idx, res, err := s.ACLTokenList(nil, true, true, "", "")
 		require.NoError(t, err)
 		require.Equal(t, uint64(4), idx)
 		require.ElementsMatch(t, tokens, res)
@@ -2872,7 +2984,7 @@ func TestStateStore_ACLRoles_Snapshot_Restore(t *testing.T) {
 		require.NoError(t, s.ACLPolicyBatchSet(2, policies))
 
 		// Read the restored ACLs back out and verify that they match.
-		idx, res, err := s.ACLRoleList(nil)
+		idx, res, err := s.ACLRoleList(nil, "")
 		require.NoError(t, err)
 		require.Equal(t, uint64(2), idx)
 		require.ElementsMatch(t, roles, res)
