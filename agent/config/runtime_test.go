@@ -3007,6 +3007,9 @@ func TestFullConfig(t *testing.T) {
 			],
 			"check_update_interval": "16507s",
 			"client_addr": "93.83.18.19",
+			"auto_encrypt": {
+				"tls": true
+			},
 			"connect": {
 				"ca_provider": "consul",
 				"ca_config": {
@@ -3559,6 +3562,9 @@ func TestFullConfig(t *testing.T) {
 			]
 			check_update_interval = "16507s"
 			client_addr = "93.83.18.19"
+			auto_encrypt = {
+				tls = true
+			}
 			connect {
 				ca_provider = "consul"
 				ca_config {
@@ -4217,6 +4223,7 @@ func TestFullConfig(t *testing.T) {
 		},
 		CheckUpdateInterval:     16507 * time.Second,
 		ClientAddrs:             []*net.IPAddr{ipAddr("93.83.18.19")},
+		AutoEncryptTLS:          true,
 		ConnectEnabled:          true,
 		ConnectProxyBindMinPort: 2000,
 		ConnectProxyBindMaxPort: 3000,
@@ -4993,6 +5000,7 @@ func TestSanitize(t *testing.T) {
 			"Token": "hidden"
 		}],
 		"ClientAddrs": [],
+		"AutoEncryptTLS": false,
 		"ConnectCAConfig": {},
 		"ConnectCAProvider": "",
 		"ConnectEnabled": false,

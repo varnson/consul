@@ -496,6 +496,10 @@ type RuntimeConfig struct {
 	// flag: -client string
 	ClientAddrs []*net.IPAddr
 
+	// AutoEncryptTLS opts the agent into provisioning agent
+	// TLS certificates.
+	AutoEncryptTLS bool
+
 	// ConnectEnabled opts the agent into connect. It should be set on all clients
 	// and servers in a cluster for correct connect operation.
 	ConnectEnabled bool
