@@ -12,6 +12,8 @@ import (
 	"github.com/hashicorp/consul/testrpc"
 	"github.com/mitchellh/cli"
 	"github.com/stretchr/testify/require"
+
+	uuid "github.com/hashicorp/go-uuid"
 )
 
 func TestRoleUpdateCommand_noTabs(t *testing.T) {
@@ -24,7 +26,6 @@ func TestRoleUpdateCommand_noTabs(t *testing.T) {
 
 func TestRoleUpdateCommand(t *testing.T) {
 	t.Parallel()
-	require := require.New(t)
 
 	testDir := testutil.TempDir(t, "acl")
 	defer os.RemoveAll(testDir)
@@ -52,12 +53,12 @@ func TestRoleUpdateCommand(t *testing.T) {
 		&api.ACLPolicy{Name: "test-policy1"},
 		&api.WriteOptions{Token: "root"},
 	)
-	require.NoError(err)
+	require.NoError(t, err)
 	policy2, _, err := client.ACL().PolicyCreate(
 		&api.ACLPolicy{Name: "test-policy2"},
 		&api.WriteOptions{Token: "root"},
 	)
-	require.NoError(err)
+	require.NoError(t, err)
 
 	// create a role
 	role, _, err := client.ACL().RoleCreate(
@@ -71,10 +72,9 @@ func TestRoleUpdateCommand(t *testing.T) {
 		},
 		&api.WriteOptions{Token: "root"},
 	)
-	require.NoError(err)
+	require.NoError(t, err)
 
-	// update with policy by name
-	{
+	t.Run("update with policy by name", func(t *testing.T) {
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -85,21 +85,23 @@ func TestRoleUpdateCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		require.Equal(code, 0)
-		require.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
 
 		role, _, err := client.ACL().RoleRead(
 			role.ID,
 			&api.QueryOptions{Token: "root"},
 		)
-		require.NoError(err)
-		require.NotNil(role)
-		// TODO verify policy count == 1 && svcid count == 1
-	}
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "test role edited", role.Description)
+		require.Len(t, role.Policies, 1)
+		require.Len(t, role.ServiceIdentities, 1)
+	})
 
-	// update with policy by id; also update with no description shouldn't
-	// delete the current description
-	{
+	t.Run("update with policy by id", func(t *testing.T) {
+		// also update with no description shouldn't delete the current
+		// description
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -109,16 +111,247 @@ func TestRoleUpdateCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		require.Equal(code, 0)
-		require.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
 
 		role, _, err := client.ACL().RoleRead(
 			role.ID,
 			&api.QueryOptions{Token: "root"},
 		)
-		require.NoError(err)
-		require.NotNil(role)
-		require.Equal("test role edited", role.Description)
-		// TODO verify policy count == 2 && svcid count == 1
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "test role edited", role.Description)
+		require.Len(t, role.Policies, 2)
+		require.Len(t, role.ServiceIdentities, 1)
+	})
+
+	t.Run("update with service identity", func(t *testing.T) {
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + role.ID,
+			"-token=root",
+			"-service-identity=web",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
+
+		role, _, err := client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "test role edited", role.Description)
+		require.Len(t, role.Policies, 2)
+		require.Len(t, role.ServiceIdentities, 2)
+	})
+
+	t.Run("update with service identity scoped to 2 DCs", func(t *testing.T) {
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + role.ID,
+			"-token=root",
+			"-service-identity=db:abc,xyz",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
+
+		role, _, err := client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "test role edited", role.Description)
+		require.Len(t, role.Policies, 2)
+		require.Len(t, role.ServiceIdentities, 3)
+	})
+}
+
+func TestRoleUpdateCommand_noMerge(t *testing.T) {
+	t.Parallel()
+
+	testDir := testutil.TempDir(t, "acl")
+	defer os.RemoveAll(testDir)
+
+	a := agent.NewTestAgent(t, t.Name(), `
+	primary_datacenter = "dc1"
+	acl {
+		enabled = true
+		tokens {
+			master = "root"
+		}
+	}`)
+
+	a.Agent.LogWriter = logger.NewLogWriter(512)
+
+	defer a.Shutdown()
+	testrpc.WaitForLeader(t, a.RPC, "dc1")
+
+	ui := cli.NewMockUi()
+
+	client := a.Client()
+
+	// Create 3 policies
+	policy1, _, err := client.ACL().PolicyCreate(
+		&api.ACLPolicy{Name: "test-policy1"},
+		&api.WriteOptions{Token: "root"},
+	)
+	require.NoError(t, err)
+	policy2, _, err := client.ACL().PolicyCreate(
+		&api.ACLPolicy{Name: "test-policy2"},
+		&api.WriteOptions{Token: "root"},
+	)
+	require.NoError(t, err)
+	policy3, _, err := client.ACL().PolicyCreate(
+		&api.ACLPolicy{Name: "test-policy3"},
+		&api.WriteOptions{Token: "root"},
+	)
+	require.NoError(t, err)
+
+	// create a role
+	createRole := func(t *testing.T) *api.ACLRole {
+		roleUnq, err := uuid.GenerateUUID()
+		require.NoError(t, err)
+
+		role, _, err := client.ACL().RoleCreate(
+			&api.ACLRole{
+				Name:        "test-role-" + roleUnq,
+				Description: "original description",
+				ServiceIdentities: []*api.ACLServiceIdentity{
+					&api.ACLServiceIdentity{
+						ServiceName: "fake",
+					},
+				},
+				Policies: []*api.ACLRolePolicyLink{
+					&api.ACLRolePolicyLink{
+						ID: policy3.ID,
+					},
+				},
+			},
+			&api.WriteOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+		t.Logf("ROLE CREATED: %#v", role)
+		return role
 	}
+
+	t.Run("update with policy by name", func(t *testing.T) {
+		role := createRole(t)
+
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + role.ID,
+			"-name=" + role.Name,
+			"-token=root",
+			"-no-merge",
+			"-policy-name=" + policy1.Name,
+		}
+		t.Logf("ARGS: %#v", args)
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
+
+		role, _, err := client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "", role.Description)
+		require.Len(t, role.Policies, 1)
+		require.Len(t, role.ServiceIdentities, 0)
+	})
+
+	t.Run("update with policy by id", func(t *testing.T) {
+		role := createRole(t)
+
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + role.ID,
+			"-name=" + role.Name,
+			"-token=root",
+			"-no-merge",
+			"-policy-id=" + policy2.ID,
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
+
+		role, _, err := client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "", role.Description)
+		require.Len(t, role.Policies, 1)
+		require.Len(t, role.ServiceIdentities, 0)
+	})
+
+	t.Run("update with service identity", func(t *testing.T) {
+		role := createRole(t)
+
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + role.ID,
+			"-name=" + role.Name,
+			"-token=root",
+			"-no-merge",
+			"-service-identity=web",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
+
+		role, _, err := client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "", role.Description)
+		require.Len(t, role.Policies, 0)
+		require.Len(t, role.ServiceIdentities, 1)
+	})
+
+	t.Run("update with service identity scoped to 2 DCs", func(t *testing.T) {
+		role := createRole(t)
+
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + role.ID,
+			"-name=" + role.Name,
+			"-token=root",
+			"-no-merge",
+			"-service-identity=db:abc,xyz",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
+		require.Empty(t, ui.ErrorWriter.String())
+
+		role, _, err := client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		require.Equal(t, "", role.Description)
+		require.Len(t, role.Policies, 0)
+		require.Len(t, role.ServiceIdentities, 1)
+	})
 }

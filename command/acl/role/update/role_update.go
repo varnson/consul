@@ -90,6 +90,7 @@ func (c *cmd) Run(args []string) int {
 	var role *api.ACLRole
 	if c.noMerge {
 		role = &api.ACLRole{
+			ID:                c.roleID,
 			Name:              c.name,
 			Description:       c.description,
 			ServiceIdentities: parsedServiceIdents,

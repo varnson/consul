@@ -84,4 +84,34 @@ func TestRoleCreateCommand(t *testing.T) {
 		assert.Equal(code, 0)
 		assert.Empty(ui.ErrorWriter.String())
 	}
+
+	// create with service identity
+	{
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+			"-name=role-with-service-identity",
+			"-description=test-role",
+			"-service-identity=web",
+		}
+
+		code := cmd.Run(args)
+		assert.Equal(code, 0)
+		assert.Empty(ui.ErrorWriter.String())
+	}
+
+	// create with service identity scoped to 2 DCs
+	{
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+			"-name=role-with-service-identity-in-2-dcs",
+			"-description=test-role",
+			"-service-identity=db:abc,xyz",
+		}
+
+		code := cmd.Run(args)
+		assert.Equal(code, 0)
+		assert.Empty(ui.ErrorWriter.String())
+	}
 }

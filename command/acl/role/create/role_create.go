@@ -78,8 +78,6 @@ func (c *cmd) Run(args []string) int {
 		Description: c.description,
 	}
 
-	// TODO: service identities
-
 	for _, policyName := range c.policyNames {
 		// We could resolve names to IDs here but there isn't any reason why its would be better
 		// than allowing the agent to do it.
