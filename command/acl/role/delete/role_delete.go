@@ -41,7 +41,7 @@ func (c *cmd) Run(args []string) int {
 	}
 
 	if c.roleID == "" {
-		c.UI.Error(fmt.Sprintf("Must specify the -id paramter"))
+		c.UI.Error(fmt.Sprintf("Must specify the -id parameter"))
 		return 1
 	}
 
@@ -74,9 +74,9 @@ func (c *cmd) Help() string {
 	return flags.Usage(c.help, nil)
 }
 
-const synopsis = "Delete an ACL ROle"
+const synopsis = "Delete an ACL Role"
 const help = `
-Usage: consul acl role delete [options] -id POLICY
+Usage: consul acl role delete [options] -id ROLE
 
     Deletes an ACL role by providing the ID or a unique ID prefix.
 

@@ -12,7 +12,7 @@ import (
 	"github.com/hashicorp/consul/sdk/testutil"
 	"github.com/hashicorp/consul/testrpc"
 	"github.com/mitchellh/cli"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRoleDeleteCommand_noTabs(t *testing.T) {
@@ -25,7 +25,6 @@ func TestRoleDeleteCommand_noTabs(t *testing.T) {
 
 func TestRoleDeleteCommand(t *testing.T) {
 	t.Parallel()
-	assert := assert.New(t)
 
 	testDir := testutil.TempDir(t, "acl")
 	defer os.RemoveAll(testDir)
@@ -44,42 +43,97 @@ func TestRoleDeleteCommand(t *testing.T) {
 	defer a.Shutdown()
 	testrpc.WaitForLeader(t, a.RPC, "dc1")
 
-	ui := cli.NewMockUi()
-	cmd := New(ui)
-
-	// Create a role
 	client := a.Client()
 
-	role, _, err := client.ACL().RoleCreate(
-		&api.ACLRole{
-			Name: "test-role",
-			ServiceIdentities: []*api.ACLServiceIdentity{
-				&api.ACLServiceIdentity{
-					ServiceName: "fake",
+	t.Run("id required", func(t *testing.T) {
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 1)
+		require.Contains(t, ui.ErrorWriter.String(), "Must specify the -id parameter")
+	})
+
+	t.Run("delete works", func(t *testing.T) {
+		// Create a role
+		role, _, err := client.ACL().RoleCreate(
+			&api.ACLRole{
+				Name: "test-role-for-id-delete",
+				ServiceIdentities: []*api.ACLServiceIdentity{
+					&api.ACLServiceIdentity{
+						ServiceName: "fake",
+					},
 				},
 			},
-		},
-		&api.WriteOptions{Token: "root"},
-	)
-	assert.NoError(err)
+			&api.WriteOptions{Token: "root"},
+		)
+		require.NoError(t, err)
 
-	args := []string{
-		"-http-addr=" + a.HTTPAddr(),
-		"-token=root",
-		"-id=" + role.ID,
-	}
+		ui := cli.NewMockUi()
+		cmd := New(ui)
 
-	code := cmd.Run(args)
-	assert.Equal(code, 0)
-	assert.Empty(ui.ErrorWriter.String())
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+			"-id=" + role.ID,
+		}
 
-	output := ui.OutputWriter.String()
-	assert.Contains(output, fmt.Sprintf("deleted successfully"))
-	assert.Contains(output, role.ID)
+		code := cmd.Run(args)
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
 
-	_, _, err = client.ACL().RoleRead(
-		role.ID,
-		&api.QueryOptions{Token: "root"},
-	)
-	assert.EqualError(err, "Unexpected response code: 403 (ACL not found)")
+		output := ui.OutputWriter.String()
+		require.Contains(t, output, fmt.Sprintf("deleted successfully"))
+		require.Contains(t, output, role.ID)
+
+		_, _, err = client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.EqualError(t, err, "Unexpected response code: 403 (ACL not found)")
+	})
+
+	t.Run("delete works via prefixes", func(t *testing.T) {
+		// Create a role
+		role, _, err := client.ACL().RoleCreate(
+			&api.ACLRole{
+				Name: "test-role-for-id-prefix-delete",
+				ServiceIdentities: []*api.ACLServiceIdentity{
+					&api.ACLServiceIdentity{
+						ServiceName: "fake",
+					},
+				},
+			},
+			&api.WriteOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+			"-id=" + role.ID[0:5],
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
+
+		output := ui.OutputWriter.String()
+		require.Contains(t, output, fmt.Sprintf("deleted successfully"))
+		require.Contains(t, output, role.ID)
+
+		_, _, err = client.ACL().RoleRead(
+			role.ID,
+			&api.QueryOptions{Token: "root"},
+		)
+		require.EqualError(t, err, "Unexpected response code: 403 (ACL not found)")
+	})
 }
