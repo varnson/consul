@@ -25,7 +25,6 @@ func TestRoleReadCommand_noTabs(t *testing.T) {
 
 func TestRoleReadCommand(t *testing.T) {
 	t.Parallel()
-	require := require.New(t)
 
 	testDir := testutil.TempDir(t, "acl")
 	defer os.RemoveAll(testDir)
@@ -44,27 +43,40 @@ func TestRoleReadCommand(t *testing.T) {
 	defer a.Shutdown()
 	testrpc.WaitForLeader(t, a.RPC, "dc1")
 
-	ui := cli.NewMockUi()
-	cmd := New(ui)
-
 	client := a.Client()
 
-	// create a role
-	role, _, err := client.ACL().RoleCreate(
-		&api.ACLRole{
-			Name: "test-role",
-			ServiceIdentities: []*api.ACLServiceIdentity{
-				&api.ACLServiceIdentity{
-					ServiceName: "fake",
+	t.Run("id or name required", func(t *testing.T) {
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 1)
+		require.Contains(t, ui.ErrorWriter.String(), "Must specify either the -id or -name parameters")
+	})
+
+	t.Run("read by id", func(t *testing.T) {
+		// create a role
+		role, _, err := client.ACL().RoleCreate(
+			&api.ACLRole{
+				Name: "test-role-by-id",
+				ServiceIdentities: []*api.ACLServiceIdentity{
+					&api.ACLServiceIdentity{
+						ServiceName: "fake",
+					},
 				},
 			},
-		},
-		&api.WriteOptions{Token: "root"},
-	)
-	require.NoError(err)
+			&api.WriteOptions{Token: "root"},
+		)
+		require.NoError(t, err)
 
-	// read by id
-	{
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
 			"-token=root",
@@ -72,16 +84,65 @@ func TestRoleReadCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		require.Equal(code, 0)
-		require.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
 
 		output := ui.OutputWriter.String()
-		require.Contains(output, fmt.Sprintf("test-role"))
-		require.Contains(output, role.ID)
-	}
+		require.Contains(t, output, fmt.Sprintf("test-role"))
+		require.Contains(t, output, role.ID)
+	})
 
-	// read by name
-	{
+	t.Run("read by id prefix", func(t *testing.T) {
+		// create a role
+		role, _, err := client.ACL().RoleCreate(
+			&api.ACLRole{
+				Name: "test-role-by-id-prefix",
+				ServiceIdentities: []*api.ACLServiceIdentity{
+					&api.ACLServiceIdentity{
+						ServiceName: "fake",
+					},
+				},
+			},
+			&api.WriteOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+			"-id=" + role.ID[0:5],
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
+
+		output := ui.OutputWriter.String()
+		require.Contains(t, output, fmt.Sprintf("test-role"))
+		require.Contains(t, output, role.ID)
+	})
+
+	t.Run("read by name", func(t *testing.T) {
+		// create a role
+		role, _, err := client.ACL().RoleCreate(
+			&api.ACLRole{
+				Name: "test-role-by-name",
+				ServiceIdentities: []*api.ACLServiceIdentity{
+					&api.ACLServiceIdentity{
+						ServiceName: "fake",
+					},
+				},
+			},
+			&api.WriteOptions{Token: "root"},
+		)
+		require.NoError(t, err)
+
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
 			"-token=root",
@@ -89,11 +150,11 @@ func TestRoleReadCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		require.Equal(code, 0)
-		require.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
 
 		output := ui.OutputWriter.String()
-		require.Contains(output, fmt.Sprintf("test-role"))
-		require.Contains(output, role.ID)
-	}
+		require.Contains(t, output, fmt.Sprintf("test-role"))
+		require.Contains(t, output, role.ID)
+	})
 }
