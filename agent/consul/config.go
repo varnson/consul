@@ -377,6 +377,10 @@ type Config struct {
 	// CAConfig is used to apply the initial Connect CA configuration when
 	// bootstrapping.
 	CAConfig *structs.CAConfiguration
+
+	// AutoEncryptTLS is whether to enable auto agent TLS certificate
+	// provisioning.
+	AutoEncryptTLS bool
 }
 
 func (c *Config) ToTLSUtilConfig() tlsutil.Config {
@@ -392,6 +396,7 @@ func (c *Config) ToTLSUtilConfig() tlsutil.Config {
 		TLSMinVersion:            c.TLSMinVersion,
 		CipherSuites:             c.TLSCipherSuites,
 		PreferServerCipherSuites: c.TLSPreferServerCipherSuites,
+		AutoEncryptTLS:           c.AutoEncryptTLS,
 	}
 }
 
