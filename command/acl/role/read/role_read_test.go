@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/consul/logger"
 	"github.com/hashicorp/consul/sdk/testutil"
 	"github.com/hashicorp/consul/testrpc"
+	"github.com/hashicorp/go-uuid"
 	"github.com/mitchellh/cli"
 	"github.com/stretchr/testify/require"
 )
@@ -57,6 +58,39 @@ func TestRoleReadCommand(t *testing.T) {
 		code := cmd.Run(args)
 		require.Equal(t, code, 1)
 		require.Contains(t, ui.ErrorWriter.String(), "Must specify either the -id or -name parameters")
+	})
+
+	t.Run("read by id not found", func(t *testing.T) {
+		fakeID, err := uuid.GenerateUUID()
+		require.NoError(t, err)
+
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+			"-id=" + fakeID,
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 1)
+		require.Contains(t, ui.ErrorWriter.String(), "Role not found with ID")
+	})
+
+	t.Run("read by name not found", func(t *testing.T) {
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-token=root",
+			"-name=blah",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 1)
+		require.Contains(t, ui.ErrorWriter.String(), "Role not found with name")
 	})
 
 	t.Run("read by id", func(t *testing.T) {

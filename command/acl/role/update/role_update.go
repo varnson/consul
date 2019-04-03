@@ -87,6 +87,16 @@ func (c *cmd) Run(args []string) int {
 		return 1
 	}
 
+	// Read the current role in both cases so we can fail better if not found.
+	currentRole, _, err := client.ACL().RoleRead(roleID, nil)
+	if err != nil {
+		c.UI.Error(fmt.Sprintf("Error when retrieving current role: %v", err))
+		return 1
+	} else if currentRole == nil {
+		c.UI.Error(fmt.Sprintf("Role not found with ID %q", roleID))
+		return 1
+	}
+
 	var role *api.ACLRole
 	if c.noMerge {
 		role = &api.ACLRole{
@@ -111,11 +121,7 @@ func (c *cmd) Run(args []string) int {
 			role.Policies = append(role.Policies, &api.ACLRolePolicyLink{ID: policyID})
 		}
 	} else {
-		role, _, err = client.ACL().RoleRead(roleID, nil)
-		if err != nil {
-			c.UI.Error(fmt.Sprintf("Error when retrieving current role: %v", err))
-			return 1
-		}
+		role = currentRole
 
 		if c.name != "" {
 			role.Name = c.name

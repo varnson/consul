@@ -254,6 +254,7 @@ func (s *HTTPServer) ACLPolicyRead(resp http.ResponseWriter, req *http.Request, 
 	}
 
 	if out.Policy == nil {
+		// TODO(rb): should this return a normal 404?
 		return nil, acl.ErrNotFound
 	}
 
@@ -647,7 +648,8 @@ func (s *HTTPServer) ACLRoleRead(resp http.ResponseWriter, req *http.Request, ro
 	}
 
 	if out.Role == nil {
-		return nil, acl.ErrNotFound
+		resp.WriteHeader(http.StatusNotFound)
+		return nil, nil
 	}
 
 	return out.Role, nil

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 
+	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/consul/command/acl"
 	"github.com/hashicorp/consul/command/flags"
 	"github.com/mitchellh/cli"
@@ -56,22 +57,34 @@ func (c *cmd) Run(args []string) int {
 		return 1
 	}
 
-	var roleID string
+	var role *api.ACLRole
+
 	if c.roleID != "" {
-		roleID, err = acl.GetRoleIDFromPartial(client, c.roleID)
+		roleID, err := acl.GetRoleIDFromPartial(client, c.roleID)
+		if err != nil {
+			c.UI.Error(fmt.Sprintf("Error determining role ID: %v", err))
+			return 1
+		}
+		role, _, err = client.ACL().RoleRead(roleID, nil)
+		if err != nil {
+			c.UI.Error(fmt.Sprintf("Error reading role %q: %v", roleID, err))
+			return 1
+		} else if role == nil {
+			c.UI.Error(fmt.Sprintf("Role not found with ID %q", roleID))
+			return 1
+		}
+
 	} else {
-		roleID, err = acl.GetRoleIDByName(client, c.roleName)
-	}
-	if err != nil {
-		c.UI.Error(fmt.Sprintf("Error determining role ID: %v", err))
-		return 1
+		role, _, err = client.ACL().RoleReadByName(c.roleName, nil)
+		if err != nil {
+			c.UI.Error(fmt.Sprintf("Error reading role %q: %v", c.roleName, err))
+			return 1
+		} else if role == nil {
+			c.UI.Error(fmt.Sprintf("Role not found with name %q", c.roleName))
+			return 1
+		}
 	}
 
-	role, _, err := client.ACL().RoleRead(roleID, nil)
-	if err != nil {
-		c.UI.Error(fmt.Sprintf("Error reading role %q: %v", roleID, err))
-		return 1
-	}
 	acl.PrintRole(role, c.UI, c.showMeta)
 	return 0
 }

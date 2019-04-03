@@ -700,11 +700,11 @@ func (a *ACL) RoleDelete(roleID string, q *WriteOptions) (*WriteMeta, error) {
 	return wm, nil
 }
 
-// RoleRead retrieves the role details (by ID).
+// RoleRead retrieves the role details (by ID). Returns nil if not found.
 func (a *ACL) RoleRead(roleID string, q *QueryOptions) (*ACLRole, *QueryMeta, error) {
 	r := a.c.newRequest("GET", "/v1/acl/role/"+roleID)
 	r.setQueryOptions(q)
-	rtt, resp, err := requireOK(a.c.doRequest(r))
+	found, rtt, resp, err := requireNotFoundOrOK(a.c.doRequest(r))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -713,6 +713,10 @@ func (a *ACL) RoleRead(roleID string, q *QueryOptions) (*ACLRole, *QueryMeta, er
 	qm := &QueryMeta{}
 	parseQueryMeta(resp, qm)
 	qm.RequestTime = rtt
+
+	if !found {
+		return nil, qm, nil
+	}
 
 	var out ACLRole
 	if err := decodeBody(resp, &out); err != nil {
@@ -722,11 +726,11 @@ func (a *ACL) RoleRead(roleID string, q *QueryOptions) (*ACLRole, *QueryMeta, er
 	return &out, qm, nil
 }
 
-// RoleReadByName retrieves the role details (by name).
+// RoleReadByName retrieves the role details (by name). Returns nil if not found.
 func (a *ACL) RoleReadByName(roleName string, q *QueryOptions) (*ACLRole, *QueryMeta, error) {
 	r := a.c.newRequest("GET", "/v1/acl/role/name/"+url.QueryEscape(roleName))
 	r.setQueryOptions(q)
-	rtt, resp, err := requireOK(a.c.doRequest(r))
+	found, rtt, resp, err := requireNotFoundOrOK(a.c.doRequest(r))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -735,6 +739,10 @@ func (a *ACL) RoleReadByName(roleName string, q *QueryOptions) (*ACLRole, *Query
 	qm := &QueryMeta{}
 	parseQueryMeta(resp, qm)
 	qm.RequestTime = rtt
+
+	if !found {
+		return nil, qm, nil
+	}
 
 	var out ACLRole
 	if err := decodeBody(resp, &out); err != nil {

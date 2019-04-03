@@ -44,8 +44,6 @@ func TestRoleUpdateCommand(t *testing.T) {
 	defer a.Shutdown()
 	testrpc.WaitForLeader(t, a.RPC, "dc1")
 
-	ui := cli.NewMockUi()
-
 	client := a.Client()
 
 	// Create 2 policies
@@ -74,7 +72,27 @@ func TestRoleUpdateCommand(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	t.Run("update a role that does not exist", func(t *testing.T) {
+		fakeID, err := uuid.GenerateUUID()
+		require.NoError(t, err)
+
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + fakeID,
+			"-token=root",
+			"-policy-name=" + policy1.Name,
+			"-description=test role edited",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 1)
+		require.Contains(t, ui.ErrorWriter.String(), "Role not found with ID")
+	})
+
 	t.Run("update with policy by name", func(t *testing.T) {
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -102,6 +120,7 @@ func TestRoleUpdateCommand(t *testing.T) {
 	t.Run("update with policy by id", func(t *testing.T) {
 		// also update with no description shouldn't delete the current
 		// description
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -126,6 +145,7 @@ func TestRoleUpdateCommand(t *testing.T) {
 	})
 
 	t.Run("update with service identity", func(t *testing.T) {
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -150,6 +170,7 @@ func TestRoleUpdateCommand(t *testing.T) {
 	})
 
 	t.Run("update with service identity scoped to 2 DCs", func(t *testing.T) {
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -193,8 +214,6 @@ func TestRoleUpdateCommand_noMerge(t *testing.T) {
 
 	defer a.Shutdown()
 	testrpc.WaitForLeader(t, a.RPC, "dc1")
-
-	ui := cli.NewMockUi()
 
 	client := a.Client()
 
@@ -241,9 +260,30 @@ func TestRoleUpdateCommand_noMerge(t *testing.T) {
 		return role
 	}
 
+	t.Run("update a role that does not exist", func(t *testing.T) {
+		fakeID, err := uuid.GenerateUUID()
+		require.NoError(t, err)
+
+		ui := cli.NewMockUi()
+		cmd := New(ui)
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+			"-id=" + fakeID,
+			"-token=root",
+			"-policy-name=" + policy1.Name,
+			"-no-merge",
+			"-description=test role edited",
+		}
+
+		code := cmd.Run(args)
+		require.Equal(t, code, 1)
+		require.Contains(t, ui.ErrorWriter.String(), "Role not found with ID")
+	})
+
 	t.Run("update with policy by name", func(t *testing.T) {
 		role := createRole(t)
 
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -272,6 +312,7 @@ func TestRoleUpdateCommand_noMerge(t *testing.T) {
 	t.Run("update with policy by id", func(t *testing.T) {
 		role := createRole(t)
 
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -300,6 +341,7 @@ func TestRoleUpdateCommand_noMerge(t *testing.T) {
 	t.Run("update with service identity", func(t *testing.T) {
 		role := createRole(t)
 
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),
@@ -328,6 +370,7 @@ func TestRoleUpdateCommand_noMerge(t *testing.T) {
 	t.Run("update with service identity scoped to 2 DCs", func(t *testing.T) {
 		role := createRole(t)
 
+		ui := cli.NewMockUi()
 		cmd := New(ui)
 		args := []string{
 			"-http-addr=" + a.HTTPAddr(),

@@ -91,11 +91,12 @@ func TestRoleDeleteCommand(t *testing.T) {
 		require.Contains(t, output, fmt.Sprintf("deleted successfully"))
 		require.Contains(t, output, role.ID)
 
-		_, _, err = client.ACL().RoleRead(
+		role, _, err = client.ACL().RoleRead(
 			role.ID,
 			&api.QueryOptions{Token: "root"},
 		)
-		require.EqualError(t, err, "Unexpected response code: 403 (ACL not found)")
+		require.NoError(t, err)
+		require.Nil(t, role)
 	})
 
 	t.Run("delete works via prefixes", func(t *testing.T) {
@@ -130,10 +131,11 @@ func TestRoleDeleteCommand(t *testing.T) {
 		require.Contains(t, output, fmt.Sprintf("deleted successfully"))
 		require.Contains(t, output, role.ID)
 
-		_, _, err = client.ACL().RoleRead(
+		role, _, err = client.ACL().RoleRead(
 			role.ID,
 			&api.QueryOptions{Token: "root"},
 		)
-		require.EqualError(t, err, "Unexpected response code: 403 (ACL not found)")
+		require.NoError(t, err)
+		require.Nil(t, role)
 	})
 }
