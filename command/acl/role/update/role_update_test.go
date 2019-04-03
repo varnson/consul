@@ -253,7 +253,6 @@ func TestRoleUpdateCommand_noMerge(t *testing.T) {
 			"-no-merge",
 			"-policy-name=" + policy1.Name,
 		}
-		t.Logf("ARGS: %#v", args)
 
 		code := cmd.Run(args)
 		require.Equal(t, code, 0, "err: %s", ui.ErrorWriter.String())
