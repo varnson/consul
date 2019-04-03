@@ -238,7 +238,6 @@ func TestRoleUpdateCommand_noMerge(t *testing.T) {
 			&api.WriteOptions{Token: "root"},
 		)
 		require.NoError(t, err)
-		t.Logf("ROLE CREATED: %#v", role)
 		return role
 	}
 
