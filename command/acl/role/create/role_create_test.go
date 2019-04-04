@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/consul/sdk/testutil"
 	"github.com/hashicorp/consul/testrpc"
 	"github.com/mitchellh/cli"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRoleCreateCommand_noTabs(t *testing.T) {
@@ -24,7 +24,6 @@ func TestRoleCreateCommand_noTabs(t *testing.T) {
 
 func TestRoleCreateCommand(t *testing.T) {
 	t.Parallel()
-	assert := assert.New(t)
 
 	testDir := testutil.TempDir(t, "acl")
 	defer os.RemoveAll(testDir)
@@ -53,7 +52,7 @@ func TestRoleCreateCommand(t *testing.T) {
 		&api.ACLPolicy{Name: "test-policy"},
 		&api.WriteOptions{Token: "root"},
 	)
-	assert.NoError(err)
+	require.NoError(t, err)
 
 	// create with policy by name
 	{
@@ -66,8 +65,8 @@ func TestRoleCreateCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		assert.Equal(code, 0)
-		assert.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
 	}
 
 	// create with policy by id
@@ -81,8 +80,8 @@ func TestRoleCreateCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		assert.Equal(code, 0)
-		assert.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
 	}
 
 	// create with service identity
@@ -96,8 +95,8 @@ func TestRoleCreateCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		assert.Equal(code, 0)
-		assert.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
 	}
 
 	// create with service identity scoped to 2 DCs
@@ -111,7 +110,7 @@ func TestRoleCreateCommand(t *testing.T) {
 		}
 
 		code := cmd.Run(args)
-		assert.Equal(code, 0)
-		assert.Empty(ui.ErrorWriter.String())
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
 	}
 }
