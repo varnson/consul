@@ -220,7 +220,6 @@ func TestLoginCommand(t *testing.T) {
 					},
 				},
 			},
-			//
 		},
 			&api.WriteOptions{Token: "root"},
 		)

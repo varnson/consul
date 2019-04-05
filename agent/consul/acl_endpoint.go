@@ -2087,11 +2087,14 @@ func (a *ACL) Logout(args *structs.ACLLogoutRequest, reply *bool) error {
 	_, token, err := a.srv.fsm.State().ACLTokenGetBySecret(nil, args.Token)
 	if err != nil {
 		return err
+
 	} else if token == nil {
 		return acl.ErrNotFound
+
 	} else if token.IDPName == "" {
 		// Can't "logout" of a token that wasn't a result of login.
 		return acl.ErrPermissionDenied
+
 	} else if !a.srv.InACLDatacenter() && !token.Local {
 		// global token writes must be forwarded to the primary DC
 		args.Datacenter = a.srv.config.ACLDatacenter
