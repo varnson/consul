@@ -1,19 +1,12 @@
 package kubernetesidp
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"net/url"
-	"path"
 	"strings"
 
 	"github.com/briankassouf/jose/crypto"
@@ -26,10 +19,11 @@ import (
 	"github.com/mitchellh/mapstructure"
 	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
-	kubeerrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	client_metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8s "k8s.io/client-go/kubernetes"
+	client_authv1 "k8s.io/client-go/kubernetes/typed/authentication/v1"
+	client_corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	client_rest "k8s.io/client-go/rest"
 )
 
 const (
@@ -205,158 +199,44 @@ type TokenReviewer interface {
 
 // This is the real implementation that calls the kubernetes API
 type TokenReviewAPI struct {
-	idp    *structs.ACLIdentityProvider // config
-	client *http.Client
+	idp      *structs.ACLIdentityProvider // config
+	saGetter client_corev1.ServiceAccountsGetter
+	trGetter client_authv1.TokenReviewsGetter
 }
 
 func NewTokenReviewer(idp *structs.ACLIdentityProvider) (*TokenReviewAPI, error) {
-	client := cleanhttp.DefaultClient()
-
-	// If we have a CA cert build the TLSConfig
-	if len(idp.KubernetesCACert) > 0 {
-		certPool := x509.NewCertPool()
-		certPool.AppendCertsFromPEM([]byte(idp.KubernetesCACert))
-
-		tlsConfig := &tls.Config{
-			MinVersion: tls.VersionTLS12,
-			RootCAs:    certPool,
-		}
-
-		client.Transport.(*http.Transport).TLSClientConfig = tlsConfig
+	transport := cleanhttp.DefaultTransport()
+	k8sclient, err := k8s.NewForConfig(&client_rest.Config{
+		Host:        idp.KubernetesHost,
+		BearerToken: idp.KubernetesServiceAccountJWT,
+		Dial:        transport.DialContext,
+		TLSClientConfig: client_rest.TLSClientConfig{
+			CAData: []byte(idp.KubernetesCACert),
+		},
+		ContentConfig: client_rest.ContentConfig{
+			ContentType: "application/json",
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
+
 	t := &TokenReviewAPI{
-		idp:    idp,
-		client: client,
+		idp:      idp,
+		saGetter: k8sclient.CoreV1(),
+		trGetter: k8sclient.AuthenticationV1(),
 	}
 
 	return t, nil
 }
 
-func (t *TokenReviewAPI) readServiceAccount(namespace, name, uid string) (*corev1.ServiceAccount, error) {
-	url := t.idp.KubernetesHost + "/" + path.Join(
-		"api/v1/namespaces",
-		url.QueryEscape(namespace),
-		"serviceaccounts",
-		url.QueryEscape(name),
-	)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	// GET /api/v1/namespaces/{namespace}/serviceaccounts/{name}
-
-	bearer := "Bearer " + t.idp.KubernetesServiceAccountJWT
-	bearer = strings.TrimSpace(bearer)
-
-	// Set the JWT as the Bearer token
-	req.Header.Set("Authorization", bearer)
-
-	// Set the MIME type headers
-	// req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error reading service account: %v", err)
-	}
-
-	sa, err := parseGetServiceAccountResponse(resp)
-	switch {
-	case kubeerrors.IsUnauthorized(err):
-		// TODO: possible?
-		// If the err is unauthorized that means the token has since been deleted
-		return nil, ErrKubeUnauthorized
-	case err != nil:
-		return nil, err
-	}
-
-	return sa, nil
-}
-
-func parseGetServiceAccountResponse(resp *http.Response) (*corev1.ServiceAccount, error) {
-	if resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// If the request was not a success create a kubernetes error
-	if resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusPartialContent {
-		// UGH the `kubeerrors` package has a nil-not-nil producing function in it. great
-		return nil, kubeerrors.NewGenericServerResponse(
-			resp.StatusCode,                 // code int
-			"GET",                           // verb string
-			schema.GroupResource{},          // qualifiedResource schema.GroupResource
-			"",                              // name string
-			strings.TrimSpace(string(body)), // serverMessage string
-			0,                               // retryAfterSeconds int
-			true,                            // isUnexpectedResponse bool
-		)
-	}
-
-	// // If we can successfully Unmarshal into a status object that means there is
-	// // an error to return
-	// var errStatus metav1.Status
-	// err = json.Unmarshal(body, &errStatus)
-	// if err == nil && errStatus.Status != metav1.StatusSuccess {
-	// 	return nil, kubeerrors.FromObject(runtime.Object(&errStatus))
-	// }
-
-	var saResp corev1.ServiceAccount
-	if err := json.Unmarshal(body, &saResp); err != nil {
-		return nil, err
-	}
-
-	return &saResp, nil
-}
-
-var (
-	ErrKubeUnauthorized = errors.New("lookup failed: service account unauthorized; this could mean it has been deleted")
-)
-
 func (t *TokenReviewAPI) Review(jwt string) (*TokenReviewResult, error) {
-	// Create the TokenReview Object and marshal it into json
-	trReq := &authv1.TokenReview{
+	r, err := t.trGetter.TokenReviews().Create(&authv1.TokenReview{
 		Spec: authv1.TokenReviewSpec{
 			Token: jwt,
 		},
-	}
-	trJSON, err := json.Marshal(trReq)
+	})
 	if err != nil {
-		return nil, err
-	}
-
-	// Build the request to the token review API
-	url := t.idp.KubernetesHost + "/apis/authentication.k8s.io/v1/tokenreviews"
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(trJSON))
-	if err != nil {
-		return nil, err
-	}
-
-	bearer := "Bearer " + t.idp.KubernetesServiceAccountJWT
-	bearer = strings.TrimSpace(bearer)
-
-	// Set the JWT as the Bearer token
-	req.Header.Set("Authorization", bearer)
-
-	// Set the MIME type headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error reviewing token: %v", err)
-	}
-
-	// Parse the resp into a tokenreview object or a kubernetes error type
-	r, err := parseTokenReviewResponse(resp)
-	switch {
-	case kubeerrors.IsUnauthorized(err):
-		// If the err is unauthorized that means the token has since been deleted
-		return nil, ErrKubeUnauthorized
-	case err != nil:
 		return nil, err
 	}
 
@@ -401,68 +281,9 @@ func (t *TokenReviewAPI) Review(jwt string) (*TokenReviewResult, error) {
 	return tr, nil
 }
 
-func jsonDebug(v interface{}) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return "<ERROR: " + err.Error() + ">"
-	}
-	return string(b)
-}
-
-// parseTokenReviewResponse takes the API response and either returns the appropriate error
-// or the TokenReview Object.
-func parseTokenReviewResponse(resp *http.Response) (*authv1.TokenReview, error) {
-	if resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// If the request was not a success create a kubernetes error
-	if resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusPartialContent {
-		return nil, kubeerrors.NewGenericServerResponse(
-			resp.StatusCode,                 // code int
-			"POST",                          // verb string
-			schema.GroupResource{},          // qualifiedResource schema.GroupResource
-			"",                              // name string
-			strings.TrimSpace(string(body)), // serverMessage string
-			0,                               // retryAfterSeconds int
-			true,                            // isUnexpectedResponse bool
-		)
-	}
-
-	// If we can successfully Unmarshal into a status object that means there is
-	// an error to return
-	var errStatus metav1.Status
-	err = json.Unmarshal(body, &errStatus)
-	if err == nil && errStatus.Status != metav1.StatusSuccess {
-		return nil, kubeerrors.FromObject(runtime.Object(&errStatus))
-	}
-
-	// Unmarshal the resp body into a TokenReview Object
-	var trResp authv1.TokenReview
-	if err := json.Unmarshal(body, &trResp); err != nil {
-		return nil, err
-	}
-
-	return &trResp, nil
-}
-
-// mock review is used while testing
-type MockTokenReview struct {
-	saName      string
-	saNamespace string
-	saUID       string
-}
-
-func (t *MockTokenReview) Review(jwt string) (*TokenReviewResult, error) {
-	return &TokenReviewResult{
-		Name:      t.saName,
-		Namespace: t.saNamespace,
-		UID:       t.saUID,
-	}, nil
+func (t *TokenReviewAPI) readServiceAccount(namespace, name, uid string) (*corev1.ServiceAccount, error) {
+	saClient := t.saGetter.ServiceAccounts(namespace)
+	return saClient.Get(name, client_metav1.GetOptions{})
 }
 
 // serviceAccount holds the metadata from the JWT token and is used to lookup

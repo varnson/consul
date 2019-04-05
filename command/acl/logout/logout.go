@@ -38,11 +38,6 @@ func (c *cmd) Run(args []string) int {
 		return 1
 	}
 
-	if c.http.Token() == "" && c.http.TokenFile() == "" {
-		c.UI.Error("Must provide a token.")
-		return 1
-	}
-
 	client, err := c.http.APIClient()
 	if err != nil {
 		c.UI.Error(fmt.Sprintf("Error connecting to Consul agent: %s", err))

@@ -31,7 +31,7 @@ type cmd struct {
 	// flags
 	idpType       string
 	idpName       string
-	idpTokenPath  string
+	idpTokenFile  string
 	tokenSinkFile string
 	meta          map[string]string
 }
@@ -45,7 +45,7 @@ func (c *cmd) init() {
 	c.flags.StringVar(&c.idpName, "idp-name", "",
 		"Name of the identity provider to login to.")
 
-	c.flags.StringVar(&c.idpTokenPath, "idp-token-path", "",
+	c.flags.StringVar(&c.idpTokenFile, "idp-token-file", "",
 		"Path to a file containing a secret bearer token to use with this identity provider.")
 
 	c.flags.StringVar(&c.tokenSinkFile, "token-sink-file", "",
@@ -71,26 +71,26 @@ func (c *cmd) Run(args []string) int {
 	}
 
 	if c.idpType == "" {
-		c.UI.Error(fmt.Sprintf("-idp-type is required"))
+		c.UI.Error(fmt.Sprintf("Missing required '-idp-type' flag"))
 		return 1
 	}
 	if c.idpName == "" {
-		c.UI.Error(fmt.Sprintf("-idp-name is required"))
+		c.UI.Error(fmt.Sprintf("Missing required '-idp-name' flag"))
 		return 1
 	}
 	if c.tokenSinkFile == "" {
-		c.UI.Error(fmt.Sprintf("-token-sink-file is required"))
+		c.UI.Error(fmt.Sprintf("Missing required '-token-sink-file' flag"))
 		return 1
 	}
 
 	switch c.idpType {
 	case "kubernetes":
-		if c.idpTokenPath == "" {
-			c.UI.Error(fmt.Sprintf("-idp-token-path is required"))
+		if c.idpTokenFile == "" {
+			c.UI.Error(fmt.Sprintf("Missing required '-idp-token-file' flag"))
 			return 1
 		}
 
-		data, err := ioutil.ReadFile(c.idpTokenPath)
+		data, err := ioutil.ReadFile(c.idpTokenFile)
 		if err != nil {
 			c.UI.Error(err.Error())
 			return 1
@@ -98,11 +98,11 @@ func (c *cmd) Run(args []string) int {
 		c.idpToken = strings.TrimSpace(string(data))
 
 		if c.idpToken == "" {
-			c.UI.Error(fmt.Sprintf("No idp token found in %s", c.idpTokenPath))
+			c.UI.Error(fmt.Sprintf("No idp token found in %s", c.idpTokenFile))
 			return 1
 		}
 	default:
-		c.UI.Error(fmt.Sprintf("-idp-type is not valid"))
+		c.UI.Error(fmt.Sprintf("Unknown '-idp-type' value provided."))
 		return 1
 	}
 

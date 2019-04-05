@@ -13,6 +13,7 @@ import (
 
 	"github.com/hashicorp/consul/acl"
 	"github.com/hashicorp/consul/agent/connect"
+	"github.com/hashicorp/consul/agent/consul/kubernetesidp"
 	"github.com/hashicorp/consul/agent/structs"
 	tokenStore "github.com/hashicorp/consul/agent/token"
 	"github.com/hashicorp/consul/lib"
@@ -3688,9 +3689,7 @@ func TestACLEndpoint_Login_LocalTokensDisabled(t *testing.T) {
 	waitForNewACLs(t, s1)
 	waitForNewACLs(t, s2)
 
-	acl := ACL{srv: s1}
 	acl2 := ACL{srv: s2}
-	_ = acl
 
 	t.Run("unknown idp", func(t *testing.T) {
 		req := structs.ACLLoginRequest{
@@ -4024,6 +4023,142 @@ func TestACLEndpoint_Login(t *testing.T) {
 	})
 }
 
+func TestACLEndpoint_Login_k8s(t *testing.T) {
+	t.Parallel()
+
+	dir1, s1 := testServerWithConfig(t, func(c *Config) {
+		c.ACLDatacenter = "dc1"
+		c.ACLsEnabled = true
+		c.ACLMasterToken = "root"
+	})
+	defer os.RemoveAll(dir1)
+	defer s1.Shutdown()
+	codec := rpcClient(t, s1)
+	defer codec.Close()
+
+	testrpc.WaitForLeader(t, s1.RPC, "dc1")
+
+	acl := ACL{srv: s1}
+
+	// spin up a fake api server
+	testSrv := kubernetesidp.StartTestAPIServer(t)
+	defer testSrv.Stop()
+
+	testSrv.AuthorizeJWT(goodJWT_A)
+	testSrv.SetAllowedServiceAccount(
+		"default",
+		"demo",
+		"76091af4-4b56-11e9-ac4b-708b11801cbe",
+		"",
+		goodJWT_B,
+	)
+
+	idp, err := upsertTestIDP_NEW(
+		codec, "root", "dc1",
+		testSrv.Addr(),
+		testSrv.CACert(),
+		goodJWT_A,
+	)
+	require.NoError(t, err)
+
+	t.Run("invalid idp token", func(t *testing.T) {
+		req := structs.ACLLoginRequest{
+			Auth: &structs.ACLLoginParams{
+				IDPType:  "kubernetes",
+				IDPName:  idp.Name,
+				IDPToken: "invalid",
+				Meta:     map[string]string{"pod": "pod1"},
+			},
+			Datacenter: "dc1",
+		}
+		resp := structs.ACLToken{}
+
+		require.Error(t, acl.Login(&req, &resp))
+	})
+
+	t.Run("valid idp token no bindings", func(t *testing.T) {
+		req := structs.ACLLoginRequest{
+			Auth: &structs.ACLLoginParams{
+				IDPType:  "kubernetes",
+				IDPName:  idp.Name,
+				IDPToken: goodJWT_B,
+				Meta:     map[string]string{"pod": "pod1"},
+			},
+			Datacenter: "dc1",
+		}
+		resp := structs.ACLToken{}
+
+		requireErrorContains(t, acl.Login(&req, &resp), "Permission denied")
+	})
+
+	_, err = upsertTestRoleBindingRule(
+		codec, "root", "dc1", idp.Name,
+		[]string{
+			"serviceaccount.namespace=default",
+		},
+		"{{serviceaccount.name}}",
+		false,
+	)
+	require.NoError(t, err)
+
+	t.Run("valid idp token 1 binding", func(t *testing.T) {
+		req := structs.ACLLoginRequest{
+			Auth: &structs.ACLLoginParams{
+				IDPType:  "kubernetes",
+				IDPName:  idp.Name,
+				IDPToken: goodJWT_B,
+				Meta:     map[string]string{"pod": "pod1"},
+			},
+			Datacenter: "dc1",
+		}
+		resp := structs.ACLToken{}
+
+		require.NoError(t, acl.Login(&req, &resp))
+
+		require.Equal(t, idp.Name, resp.IDPName)
+		require.Equal(t, `token created via login: {"pod":"pod1"}`, resp.Description)
+		require.True(t, resp.Local)
+		require.Len(t, resp.Roles, 1)
+		role := resp.Roles[0]
+		require.Empty(t, role.ID)
+		require.Empty(t, role.Name)
+		require.Equal(t, "demo", role.BoundName)
+	})
+
+	// annotate the account
+	testSrv.SetAllowedServiceAccount(
+		"default",
+		"demo",
+		"76091af4-4b56-11e9-ac4b-708b11801cbe",
+		"alternate-name",
+		goodJWT_B,
+	)
+
+	t.Run("valid idp token 1 binding", func(t *testing.T) {
+		req := structs.ACLLoginRequest{
+			Auth: &structs.ACLLoginParams{
+				IDPType:  "kubernetes",
+				IDPName:  idp.Name,
+				IDPToken: goodJWT_B,
+				Meta:     map[string]string{"pod": "pod1"},
+			},
+			Datacenter: "dc1",
+		}
+		resp := structs.ACLToken{}
+
+		require.NoError(t, acl.Login(&req, &resp))
+
+		require.Equal(t, idp.Name, resp.IDPName)
+		require.Equal(t, `token created via login: {"pod":"pod1"}`, resp.Description)
+		require.True(t, resp.Local)
+		require.Len(t, resp.Roles, 1)
+		role := resp.Roles[0]
+		require.Empty(t, role.ID)
+		require.Empty(t, role.Name)
+		require.Equal(t, "alternate-name", role.BoundName)
+	})
+}
+
 func TestACLEndpoint_Logout(t *testing.T) {
 	t.Parallel()
 
@@ -4041,9 +4176,25 @@ func TestACLEndpoint_Logout(t *testing.T) {
 
 	acl := ACL{srv: s1}
 
-	ca := connect.TestCA(t, nil)
+	// spin up a fake api server
+	testSrv := kubernetesidp.StartTestAPIServer(t)
+	defer testSrv.Stop()
 
-	idp, err := upsertTestIDP(codec, "root", "dc1", ca.RootCert)
+	testSrv.AuthorizeJWT(goodJWT_A)
+	testSrv.SetAllowedServiceAccount(
+		"default",
+		"demo",
+		"76091af4-4b56-11e9-ac4b-708b11801cbe",
+		"",
+		goodJWT_B,
+	)
+
+	idp, err := upsertTestIDP_NEW(
+		codec, "root", "dc1",
+		testSrv.Addr(),
+		testSrv.CACert(),
+		goodJWT_A,
+	)
 	require.NoError(t, err)
 
 	_, err = upsertTestRoleBindingRule(
@@ -4053,24 +4204,6 @@ func TestACLEndpoint_Logout(t *testing.T) {
 		false,
 	)
 	require.NoError(t, err)
-
-	// Swap out the k8s validator with our own test one.
-	validator := &fakeK8SIdentityProviderValidator{}
-	validator.InstallToken(
-		"fake-web", // no rules
-		map[string]string{
-			"serviceaccount.namespace": "default",
-			"serviceaccount.name":      "web",
-			"serviceaccount.uid":       "abc123",
-		},
-	)
-	s1.aclIDPValidatorCreateTestHook = func(orig IdentityProviderValidator) (IdentityProviderValidator, error) {
-		if k8s, ok := orig.(*k8sIdentityProviderValidator); ok {
-			validator.k8sIdentityProviderValidator = k8s
-			return validator, nil
-		}
-		return orig, nil
-	}
 
 	t.Run("you must provide a token", func(t *testing.T) {
 		req := structs.ACLLogoutRequest{
@@ -4107,7 +4240,7 @@ func TestACLEndpoint_Logout(t *testing.T) {
 			Auth: &structs.ACLLoginParams{
 				IDPType:  "kubernetes",
 				IDPName:  idp.Name,
-				IDPToken: "fake-web",
+				IDPToken: goodJWT_B,
 				Meta:     map[string]string{"pod": "pod1"},
 			},
 			Datacenter: "dc1",
@@ -4126,10 +4259,6 @@ func TestACLEndpoint_Logout(t *testing.T) {
 		var ignored bool
 		require.NoError(t, acl.Logout(&req, &ignored))
 	})
-
-	// TODO: token not found
-	// TODO: not an idp token
-	// TODO: not in acl datacenter or token is not local (FORWARD)
 }
 
 func gatherIDs(t *testing.T, v interface{}) []string {
@@ -4404,6 +4533,12 @@ func deleteTestIDP(codec rpc.ClientCodec, masterToken string, datacenter string,
 }
 
 func upsertTestIDP(codec rpc.ClientCodec, masterToken string, datacenter string, caCert string) (*structs.ACLIdentityProvider, error) {
+	return upsertTestIDP_NEW(codec, masterToken, datacenter, "https://abc:8443", caCert, goodJWT_A)
+}
+func upsertTestIDP_NEW(
+	codec rpc.ClientCodec, masterToken string, datacenter string,
+	kubeHost, caCert, kubeJWT string,
+) (*structs.ACLIdentityProvider, error) {
 	name, err := uuid.GenerateUUID()
 	if err != nil {
 		return nil, err
@@ -4414,9 +4549,9 @@ func upsertTestIDP(codec rpc.ClientCodec, masterToken string, datacenter string,
 		IdentityProvider: structs.ACLIdentityProvider{
 			Name:                        "test-idp-" + name,
 			Type:                        "kubernetes",
-			KubernetesHost:              "https://abc:8443",
+			KubernetesHost:              kubeHost,
 			KubernetesCACert:            caCert,
-			KubernetesServiceAccountJWT: goodJWT_A,
+			KubernetesServiceAccountJWT: kubeJWT,
 		},
 		WriteRequest: structs.WriteRequest{Token: masterToken},
 	}
@@ -4532,5 +4667,5 @@ func requireErrorContains(t *testing.T, err error, expectedErrorMessage string) 
 	}
 }
 
-const goodJWT_A = "eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImRlbW8tdG9rZW4ta21iOW4iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiZGVtbyIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc2MDkxYWY0LTRiNTYtMTFlOS1hYzRiLTcwOGIxMTgwMWNiZSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OmRlbW8ifQ.ZiAHjijBAOsKdum0Aix6lgtkLkGo9_Tu87dWQ5Zfwnn3r2FejEWDAnftTft1MqqnMzivZ9Wyyki5ZjQRmTAtnMPJuHC-iivqY4Wh4S6QWCJ1SivBv5tMZR79t5t8mE7R1-OHwst46spru1pps9wt9jsA04d3LpV0eeKYgdPTVaQKklxTm397kIMUugA6yINIBQ3Rh8eQqBgNwEmL4iqyYubzHLVkGkoP9MJikFI05vfRiHtYr-piXz6JFDzXMQj9rW6xtMmrBSn79ChbyvC5nz-Nj2rJPnHsb_0rDUbmXY5PpnMhBpdSH-CbZ4j8jsiib6DtaGJhVZeEQ1GjsFAZwQ"
-const goodJWT_B = "eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImNvbnN1bC1pZHAtdG9rZW4tcmV2aWV3LWFjY291bnQtdG9rZW4tbTYyZHMiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiY29uc3VsLWlkcC10b2tlbi1yZXZpZXctYWNjb3VudCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc1ZTNjYmVhLTRiNTYtMTFlOS1hYzRiLTcwOGIxMTgwMWNiZSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OmNvbnN1bC1pZHAtdG9rZW4tcmV2aWV3LWFjY291bnQifQ.uMb66tZ8d8gNzS8EnjlkzbrGKc5M-BESwS5B46IUbKfdMtajsCwgBXICytWKQ2X7wfm4QQykHVaElijBlO8QVvYeYzQE0uy75eH9EXNXmRh862YL_Qcy_doPC0R6FQXZW99S5Joc-3riKsq7N-sjEDBshOqyfDaGfan3hxaiV4Bv4hXXWRFUQ9aTAfPVvk1FQi21U9Fbml9ufk8kkk6gAmIEA_o7p-ve6WIhm48t7MJv314YhyVqXdrvmRykPdMwj4TfwSn3pTJ82P4NgSbXMJhwNkwIadJPZrM8EfN5ISpR4EW3jzP3IHtgQxrIovWQ9TQib1Z5zdRaLWaFVm6XaQ"
+const goodJWT_A = "eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImNvbnN1bC1pZHAtdG9rZW4tcmV2aWV3LWFjY291bnQtdG9rZW4tbTYyZHMiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiY29uc3VsLWlkcC10b2tlbi1yZXZpZXctYWNjb3VudCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc1ZTNjYmVhLTRiNTYtMTFlOS1hYzRiLTcwOGIxMTgwMWNiZSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OmNvbnN1bC1pZHAtdG9rZW4tcmV2aWV3LWFjY291bnQifQ.uMb66tZ8d8gNzS8EnjlkzbrGKc5M-BESwS5B46IUbKfdMtajsCwgBXICytWKQ2X7wfm4QQykHVaElijBlO8QVvYeYzQE0uy75eH9EXNXmRh862YL_Qcy_doPC0R6FQXZW99S5Joc-3riKsq7N-sjEDBshOqyfDaGfan3hxaiV4Bv4hXXWRFUQ9aTAfPVvk1FQi21U9Fbml9ufk8kkk6gAmIEA_o7p-ve6WIhm48t7MJv314YhyVqXdrvmRykPdMwj4TfwSn3pTJ82P4NgSbXMJhwNkwIadJPZrM8EfN5ISpR4EW3jzP3IHtgQxrIovWQ9TQib1Z5zdRaLWaFVm6XaQ"
+const goodJWT_B = "eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImRlbW8tdG9rZW4ta21iOW4iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiZGVtbyIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6Ijc2MDkxYWY0LTRiNTYtMTFlOS1hYzRiLTcwOGIxMTgwMWNiZSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OmRlbW8ifQ.ZiAHjijBAOsKdum0Aix6lgtkLkGo9_Tu87dWQ5Zfwnn3r2FejEWDAnftTft1MqqnMzivZ9Wyyki5ZjQRmTAtnMPJuHC-iivqY4Wh4S6QWCJ1SivBv5tMZR79t5t8mE7R1-OHwst46spru1pps9wt9jsA04d3LpV0eeKYgdPTVaQKklxTm397kIMUugA6yINIBQ3Rh8eQqBgNwEmL4iqyYubzHLVkGkoP9MJikFI05vfRiHtYr-piXz6JFDzXMQj9rW6xtMmrBSn79ChbyvC5nz-Nj2rJPnHsb_0rDUbmXY5PpnMhBpdSH-CbZ4j8jsiib6DtaGJhVZeEQ1GjsFAZwQ"

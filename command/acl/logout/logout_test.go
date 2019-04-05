@@ -1,5 +1,3 @@
-//+build ignore
-
 package logout
 
 import (
@@ -10,13 +8,13 @@ import (
 	"github.com/hashicorp/consul/agent"
 	"github.com/hashicorp/consul/agent/structs"
 	"github.com/hashicorp/consul/logger"
+	"github.com/hashicorp/consul/sdk/testutil"
 	"github.com/hashicorp/consul/testrpc"
-	"github.com/hashicorp/consul/testutil"
 	"github.com/mitchellh/cli"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestBootstrapCommand_noTabs(t *testing.T) {
+func TestLogout_noTabs(t *testing.T) {
 	t.Parallel()
 
 	if strings.ContainsRune(New(cli.NewMockUi()).Help(), '\t') {
@@ -24,9 +22,8 @@ func TestBootstrapCommand_noTabs(t *testing.T) {
 	}
 }
 
-func TestBootstrapCommand(t *testing.T) {
+func TestLogoutCommand(t *testing.T) {
 	t.Parallel()
-	assert := assert.New(t)
 
 	testDir := testutil.TempDir(t, "acl")
 	defer os.RemoveAll(testDir)
@@ -42,17 +39,20 @@ func TestBootstrapCommand(t *testing.T) {
 	defer a.Shutdown()
 	testrpc.WaitForLeader(t, a.RPC, "dc1")
 
-	ui := cli.NewMockUi()
-	cmd := New(ui)
+	t.Run("no token specified", func(t *testing.T) {
+		ui := cli.NewMockUi()
+		cmd := New(ui)
 
-	args := []string{
-		"-http-addr=" + a.HTTPAddr(),
-	}
+		args := []string{
+			"-http-addr=" + a.HTTPAddr(),
+		}
 
-	code := cmd.Run(args)
-	assert.Equal(code, 0)
-	assert.Empty(ui.ErrorWriter.String())
-	output := ui.OutputWriter.String()
-	assert.Contains(output, "Bootstrap Token")
-	assert.Contains(output, structs.ACLPolicyGlobalManagementID)
+		code := cmd.Run(args)
+		require.Equal(t, code, 0)
+		require.Empty(t, ui.ErrorWriter.String())
+
+		output := ui.OutputWriter.String()
+		require.Contains(t, output, "Bootstrap Token")
+		require.Contains(t, output, structs.ACLPolicyGlobalManagementID)
+	})
 }
