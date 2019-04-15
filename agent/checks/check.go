@@ -360,6 +360,12 @@ func (c *CheckHTTP) Stop() {
 func (c *CheckHTTP) run() {
 	// Get the randomized initial pause time
 	initialPauseTime := lib.RandomStagger(c.Interval)
+	//for maintence mode, at least wait 2 seconds
+	minTime := 2 * time.Second
+
+	if initialPauseTime < minTime {
+		initialPauseTime = minTime
+	}
 	next := time.After(initialPauseTime)
 	for {
 		select {
