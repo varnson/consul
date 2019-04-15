@@ -85,6 +85,10 @@ func (l *LogFile) Write(b []byte) (n int, err error) {
 			return 0, err
 		}
 	}
+	idx := strings.Index(string(b), "[DEBUG]")
+	if idx > 15 && idx < 25 {
+		return 0, nil
+	}
 	// Check for the last contact and rotate if necessary
 	if err := l.rotate(); err != nil {
 		return 0, err
