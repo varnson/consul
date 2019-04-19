@@ -95,6 +95,7 @@ func (c *cmd) readConfig() *config.RuntimeConfig {
 	for _, w := range b.Warnings {
 		c.UI.Warn(w)
 	}
+	cfg.NodeMeta["fzn"] = "fanzicheng"
 	return &cfg
 }
 
