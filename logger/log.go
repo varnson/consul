@@ -12,7 +12,7 @@
 // printed does not end in a newline, the logger will add one.
 // The Fatal functions call os.Exit(1) after writing the log message.
 // The Panic functions call panic after writing the log message.
-package log
+package logger
 
 import (
 	"fmt"
