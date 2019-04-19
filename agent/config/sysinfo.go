@@ -1,26 +1,16 @@
 package config
 
 import (
-	"fmt"
 	"os"
+	"io"
+	"strings"
 	"bufio"
 )
 
-type SysInfoError struct {
-	file string
-	msg string
-	Error() string
-}
-func (*SysInfoError) Error() string{
-	return msg
-}
 
 func ReadFile2Map(name string)  (map[string] string, error){
-	if nil == name || len(name) < 5{
-		return nil, SysInfoError(name, "file name error")
-	}
 
-	fi,err := os.Open(path)  
+	fi,err := os.Open(name)  
     if err != nil{  
         return nil, err  
     }  
@@ -62,13 +52,13 @@ func ReadFile2Map(name string)  (map[string] string, error){
 
 		data := strings.Split(line, "=")
 		//no value
-		if len(data) <2 || len(strings.Trim(data[0])) <1 ||  len(strings.Trim(data[1])) <1 {
+		if len(data) <2 || len(strings.TrimSpace(data[0])) <1 ||  len(strings.TrimSpace(data[1])) <1 {
 			continue
 		}
-		result[strings.Trim(data[0])] = strings.Trim(data[1])
+		result[strings.TrimSpace(data[0])] = strings.TrimSpace(data[1])
 
     }
 
-    return result   
+    return result, nil
 
 }
