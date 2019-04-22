@@ -3,7 +3,6 @@ package logger
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +16,12 @@ var (
 type LogFile struct {
 	//Name of the log file
 	fileName string
+
+	//full Name of the log file
+	fullName string
+
+	//rotate Name of the log file
+	rotateName string
 
 	//Path to the log file
 	logPath string
@@ -51,10 +56,13 @@ func (l *LogFile) openNew() error {
 	fileName := strings.TrimSuffix(l.fileName, fileExt)
 	// New file name has the format : filename-timestamp.extension
 	createTime := now()
-	newfileName := fileName + "-" + strconv.FormatInt(createTime.UnixNano(), 10) + fileExt
+	l.rotateName = fileName + "-" + time.Unix(createTime.Unix(), 0).Format("20110203030406") + fileExt
+	newfileName := fileName + fileExt
 	newfilePath := filepath.Join(l.logPath, newfileName)
+	l.fullName = newfilePath
+	l.rotateName = filepath.Join(l.logPath, l.rotateName)
 	// Try creating a file. We truncate the file because we are the only authority to write the logs
-	filePointer, err := os.OpenFile(newfilePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0640)
+	filePointer, err := os.OpenFile(newfilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
 	if err != nil {
 		return err
 	}
@@ -71,6 +79,7 @@ func (l *LogFile) rotate() error {
 	// Rotate if we hit the byte file limit or the time limit
 	if (l.BytesWritten >= int64(l.MaxBytes) && (l.MaxBytes > 0)) || timeElapsed >= l.duration {
 		l.FileInfo.Close()
+		os.Rename(l.fullName, l.rotate)
 		return l.openNew()
 	}
 	return nil
